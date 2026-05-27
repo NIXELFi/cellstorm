@@ -3,6 +3,7 @@
   "references": [
     { "path": "./packages/sim" },
     { "path": "./packages/score" },
+    { "path": "./packages/render" },
     { "path": "./apps/cli" }
   ]
 }
