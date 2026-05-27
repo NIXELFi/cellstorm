@@ -6,7 +6,7 @@ describe("EventSink", () => {
     const s = new EventSink();
     s.tick = 5;
     s.death(1, 10, 20, 0);
-    s.kill(2, 0, 1);
+    s.kill(0, 1);
     expect(s.events).toHaveLength(2);
     expect(s.events[0]).toMatchObject({ type: "death", tick: 5, team: 0 });
   });
