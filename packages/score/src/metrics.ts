@@ -52,10 +52,15 @@ export function runGates(log: BattleLog, profile: ScoreProfile): string[] {
  * single-element timelines and zero-death logs so a real battle never yields
  * NaN.
  */
-export function components(
-  log: BattleLog,
-  profile: ScoreProfile,
-): Record<string, number> {
+export interface Components {
+  leadVolatility: number;
+  comeback: number;
+  climaxTiming: number;
+  closeFinish: number;
+  sustainedChaos: number;
+}
+
+export function components(log: BattleLog, profile: ScoreProfile): Components {
   const tl = log.timeline;
   const n = tl.length;
 

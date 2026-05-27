@@ -8,11 +8,11 @@ export function score(log: BattleLog, profile: ScoreProfile): DramaReport {
   const comp = components(log, profile);
   const w = profile.weights;
   const total =
-    comp.leadVolatility! * w.leadVolatility +
-    comp.comeback! * w.comeback +
-    comp.climaxTiming! * w.climaxTiming +
-    comp.closeFinish! * w.closeFinish +
-    comp.sustainedChaos! * w.sustainedChaos;
+    comp.leadVolatility * w.leadVolatility +
+    comp.comeback * w.comeback +
+    comp.climaxTiming * w.climaxTiming +
+    comp.closeFinish * w.closeFinish +
+    comp.sustainedChaos * w.sustainedChaos;
   return { passed: true, score: total, breakdown: comp, reasons: [] };
 }
 
