@@ -2,7 +2,11 @@
   "name": "@cellstorm/cli",
   "version": "0.1.0",
   "type": "module",
-  "main": "./src/cli.ts",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./cli": "./src/cli.ts"
+  },
   "scripts": {
     "start": "tsx src/cli.ts"
   },

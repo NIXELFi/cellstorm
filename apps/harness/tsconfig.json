@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "./dist-tsc",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["node"],
+    "noEmit": false
+  },
+  "references": [
+    { "path": "../../packages/sim" },
+    { "path": "../../packages/score" },
+    { "path": "../../packages/render" },
+    { "path": "../cli" }
+  ],
+  "include": ["src", "test"]
+}
