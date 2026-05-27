@@ -1,6 +1,7 @@
 import { Worker } from "node:worker_threads";
 import { createRequire } from "node:module";
 import type { BattleConfig } from "@cellstorm/sim";
+import type { BattleLog } from "@cellstorm/sim";
 import type { ScoreProfile } from "@cellstorm/score";
 import { expand, type SweepSpec } from "./sweepSpec";
 import { Store, configId, type ResultRow } from "./store";
@@ -29,6 +30,48 @@ function resultRow(batchId: string, r: WorkerResult): ResultRow {
     durationTicks: r.summary.durationTicks,
     batchId,
   };
+}
+
+/**
+ * Bounded ascending min-list of the top-N scores seen so far. Lets us compute the
+ * "is this score worth keeping a log for" threshold in O(N) per insert without any
+ * DB round-trip. N is small (topNlogs, default 25) so a sorted array beats a heap
+ * for clarity. min() is the threshold a new score must meet/exceed once full.
+ */
+export class TopNScores {
+  private readonly arr: number[] = []; // ascending
+  constructor(private readonly n: number) {}
+
+  /** Offer a score; keeps at most n highest. */
+  add(score: number): void {
+    if (this.n <= 0) return;
+    if (this.arr.length < this.n) {
+      this.insertSorted(score);
+      return;
+    }
+    if (score > this.arr[0]!) {
+      this.arr.shift();
+      this.insertSorted(score);
+    }
+  }
+
+  private insertSorted(score: number): void {
+    let lo = 0;
+    let hi = this.arr.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (this.arr[mid]! < score) lo = mid + 1;
+      else hi = mid;
+    }
+    this.arr.splice(lo, 0, score);
+  }
+
+  /** The score a log must meet/exceed to be worth persisting. */
+  threshold(): number {
+    if (this.n <= 0) return Infinity; // keep no logs at all
+    if (this.arr.length < this.n) return -Infinity; // not yet full: keep everything
+    return this.arr[0]!;
+  }
 }
 
 /**
@@ -104,47 +147,80 @@ export async function runSweep(job: SweepJob): Promise<void> {
   const topNlogs = job.topNlogs ?? 25;
 
   const store = new Store(dbPath);
-  try {
-    const all = expand(spec);
-    const done = store.allConfigIds();
-    const tasks: BattleConfig[] = all.filter((c) => !done.has(configId(c)));
-    const total = tasks.length;
 
+  const all = expand(spec);
+  const done = store.allConfigIds();
+  const tasks: BattleConfig[] = all.filter((c) => !done.has(configId(c)));
+  const total = tasks.length;
+
+  // Buffered rows awaiting flush, and the logs we deferred for those rows. Logs are
+  // written ONLY when their row is committed by insertMany — so a crash can never
+  // leave a .gz on disk with no matching DB row.
+  const buffer: ResultRow[] = [];
+  const pendingLogs = new Map<string, BattleLog>();
+  let completed = 0;
+  let stopped = false;
+
+  // In-memory running structures: the top-N score window (for the log-keep
+  // threshold) and the true running max (for onProgress). No per-result DB query.
+  const topScores = new TopNScores(topNlogs);
+  let runningMax = bestScore(store, batchId);
+  // Seed the top-N window from already-stored rows so resume keeps a correct threshold.
+  for (const r of store.topN(topNlogs, batchId)) topScores.add(r.score);
+
+  const flush = () => {
+    if (buffer.length === 0) return;
+    const rows = buffer.splice(0, buffer.length);
+    store.insertMany(rows);
+    // Only after the rows are committed do we persist their deferred logs.
+    for (const row of rows) {
+      const log = pendingLogs.get(row.configId);
+      if (log) {
+        store.saveLog(row.configId, log);
+        pendingLogs.delete(row.configId);
+      }
+    }
+  };
+
+  const handleResult = (r: WorkerResult) => {
+    const row = resultRow(batchId, r);
+    buffer.push(row);
+    completed++;
+    if (r.report.score > runningMax) runningMax = r.report.score;
+    // Decide log persistence against the running top-N threshold BEFORE adding this
+    // score, so a config is judged against the others (not against itself).
+    if (r.report.score >= topScores.threshold()) {
+      pendingLogs.set(row.configId, r.log);
+    }
+    topScores.add(r.report.score);
+    if (buffer.length >= FLUSH_EVERY) flush();
+    job.onProgress?.(completed, total, runningMax);
+  };
+
+  /**
+   * After the sweep settles, prune cached logs whose score is below the final
+   * top-N threshold so the cache stays bounded to ~topNlogs as promised. Keeps the
+   * union of (logs we just decided to keep) and the actual stored top-N rows.
+   */
+  const pruneLogs = () => {
+    if (topNlogs <= 0) return;
+    const keep = new Set(store.topN(topNlogs, batchId).map((r) => r.configId));
+    for (const id of store.cachedLogIds()) {
+      if (!keep.has(id)) store.deleteLog(id);
+    }
+  };
+
+  try {
     if (total === 0) {
-      job.onProgress?.(0, 0, bestScore(store, batchId));
+      job.onProgress?.(0, 0, runningMax);
       return;
     }
-
-    const buffer: ResultRow[] = [];
-    let completed = 0;
-    let stopped = false;
-
-    // Track the running top-N score threshold for selective log persistence.
-    const flush = () => {
-      if (buffer.length) {
-        store.insertMany(buffer.splice(0, buffer.length));
-      }
-    };
-
-    const handleResult = (r: WorkerResult) => {
-      const row = resultRow(batchId, r);
-      buffer.push(row);
-      completed++;
-      // Persist logs only for configs whose score is within the running top-N.
-      const threshold = topNScoreThreshold(store, batchId, topNlogs, buffer);
-      if (r.report.score >= threshold) {
-        store.saveLog(row.configId, r.log);
-      }
-      if (buffer.length >= FLUSH_EVERY) flush();
-      job.onProgress?.(completed, total, Math.max(threshold, bestScore(store, batchId)));
-    };
 
     const runInline = () => {
       for (const config of tasks.slice(completed)) {
         if (job.stopFlag?.()) { stopped = true; break; }
         handleResult(runOne({ config, profile }));
       }
-      flush();
     };
 
     // Try real worker threads; fall back to inline if they can't boot under tsx.
@@ -154,73 +230,240 @@ export async function runSweep(job: SweepJob): Promise<void> {
       return;
     }
 
-    await new Promise<void>((resolve, reject) => {
-      let nextIndex = 0;
-      let active = 0;
-      const workers: Worker[] = [];
+    await runPool({ tasks, concurrency, profile, handleResult, isStopped: () => {
+      if (!stopped && job.stopFlag?.()) stopped = true;
+      return stopped;
+    } });
+  } finally {
+    // ANY termination path (success, stop, error, unexpected worker exit) must flush
+    // the buffer (so up to FLUSH_EVERY-1 computed results aren't lost) and only then
+    // close the store. Worker teardown is handled inside runPool's own finally.
+    try {
+      flush();
+      pruneLogs();
+    } finally {
+      store.close();
+    }
+  }
+}
 
-      const tryStop = () => {
-        if (!stopped && job.stopFlag?.()) stopped = true;
-        return stopped;
-      };
+/**
+ * Minimal worker surface the pool relies on. `node:worker_threads`' Worker
+ * satisfies it; tests provide a fake to simulate death/error/exit deterministically.
+ */
+export interface PoolWorker {
+  postMessage(value: unknown): void;
+  on(event: "message", cb: (r: WorkerResult) => void): void;
+  on(event: "error", cb: (err: Error) => void): void;
+  on(event: "exit", cb: (code: number) => void): void;
+  removeAllListeners(): void;
+  terminate(): Promise<number> | void;
+}
 
-      const finishWorker = (w: Worker) => {
-        w.postMessage({ done: true });
-        active--;
-        if (active === 0) {
-          flush();
-          for (const ww of workers) ww.terminate().catch(() => {});
-          resolve();
+interface PoolArgs {
+  tasks: BattleConfig[];
+  concurrency: number;
+  profile?: ScoreProfile;
+  handleResult: (r: WorkerResult) => void;
+  isStopped: () => boolean;
+  /** Spawn factory (injectable for tests). Returns null if no worker can be spawned. */
+  spawn?: () => PoolWorker | null;
+  /** Inline runner used when no worker can be spawned (injectable for tests). */
+  inline?: (task: WorkerTask) => WorkerResult;
+}
+
+/**
+ * Worker-pool driver hardened for unattended multi-hour runs. Guarantees:
+ *  - The returned promise ALWAYS settles — no hang — regardless of how a worker dies
+ *    (clean exit, error, OOM, native abort).
+ *  - A worker that dies with an in-flight task has that task REASSIGNED to a healthy /
+ *    freshly-spawned worker, so a single crash never aborts the sweep.
+ *  - On any exit path, all live workers are terminated (no thread leak).
+ *
+ * Per-battle errors are logged (the config is reproducible from its seed) and the
+ * sweep continues — one bad config never kills the run.
+ */
+export function runPool(args: PoolArgs): Promise<void> {
+  const { tasks, concurrency, profile, handleResult, isStopped } = args;
+  const spawn = args.spawn ?? trySpawnWorker;
+  const inline = args.inline ?? runOne;
+
+  return new Promise<void>((resolve) => {
+    let nextIndex = 0;
+    let settled = false;
+    // configIds (by task index) currently assigned to each worker, so we know what
+    // to reassign if it dies mid-task.
+    const inFlight = new Map<PoolWorker, number>();
+    const workers = new Set<PoolWorker>();
+    // Indices whose worker died and which need re-running (drained before nextIndex).
+    const requeue: number[] = [];
+
+    const allTasksDispatched = () =>
+      nextIndex >= tasks.length && requeue.length === 0;
+
+    const settle = () => {
+      if (settled) return;
+      settled = true;
+      for (const w of workers) {
+        w.removeAllListeners();
+        void Promise.resolve(w.terminate()).catch(() => {});
+      }
+      workers.clear();
+      inFlight.clear();
+      resolve();
+    };
+
+    // Last-resort: drain any remaining (or requeued) work inline, then settle. Used
+    // when the pool has zero live workers and cannot spawn more — the no-hang
+    // backstop. Determinism-equivalent to the worker path: same `runOne`/inline.
+    const drainInlineAndSettle = () => {
+      if (settled) return;
+      let idx: number | null;
+      while ((idx = nextTaskIndex()) !== null) {
+        try {
+          handleResult(inline({ config: tasks[idx]!, profile }));
+        } catch (err) {
+          process.stderr.write(
+            `\n[sweep] inline fallback error (config seed=${tasks[idx]!.seed}): ${
+              err instanceof Error ? err.message : String(err)
+            }\n`,
+          );
         }
-      };
+      }
+      settle();
+    };
 
-      const assign = (w: Worker) => {
-        if (tryStop() || nextIndex >= tasks.length) {
-          finishWorker(w);
-          return;
-        }
-        const config = tasks[nextIndex++]!;
-        const task: WorkerTask = { config, profile };
+    const maybeFinish = () => {
+      // Done when every task has been dispatched and no worker is still busy, or when
+      // we've been asked to stop and nothing is in flight.
+      if (workers.size === 0) {
+        // No workers left. If work remains and we're not stopping, finish it inline so
+        // a total worker wipeout still completes the sweep instead of silently dropping
+        // tasks. Otherwise just settle.
+        if (!isStopped() && !allTasksDispatched()) drainInlineAndSettle();
+        else settle();
+        return;
+      }
+      if ((allTasksDispatched() || isStopped()) && inFlight.size === 0) {
+        settle();
+      }
+    };
+
+    const nextTaskIndex = (): number | null => {
+      if (isStopped()) return null;
+      if (requeue.length > 0) return requeue.shift()!;
+      if (nextIndex < tasks.length) return nextIndex++;
+      return null;
+    };
+
+    // Hand the worker its next task, or finalize it if there's no more work.
+    const assign = (w: PoolWorker) => {
+      if (settled || !workers.has(w)) return;
+      const idx = nextTaskIndex();
+      if (idx === null) {
+        inFlight.delete(w);
+        // No more work for this worker: ask it to close its port, then tear it down.
+        try { w.postMessage({ done: true }); } catch { /* worker already gone */ }
+        maybeFinish();
+        return;
+      }
+      inFlight.set(w, idx);
+      const task: WorkerTask = { config: tasks[idx]!, profile };
+      try {
         w.postMessage(task);
-      };
+      } catch {
+        // Worker died between selection and post: requeue and let exit/respawn cover it.
+        requeue.push(idx);
+        inFlight.delete(w);
+      }
+    };
 
-      for (let i = 0; i < concurrency && i < tasks.length; i++) {
-        const w = trySpawnWorker();
-        if (!w) { reject(new Error("worker spawn failed mid-pool")); return; }
-        active++;
-        workers.push(w);
-        w.on("message", (r: WorkerResult) => {
-          handleResult(r);
-          assign(w);
-        });
-        w.on("error", (err) => reject(err));
+    // Respawn capacity if we still have undispatched work and lost a worker, so a
+    // crash doesn't permanently shrink the pool below what the workload needs.
+    const replenish = () => {
+      if (settled) return;
+      const remaining = (tasks.length - nextIndex) + requeue.length;
+      while (
+        !isStopped() &&
+        workers.size < concurrency &&
+        workers.size < remaining + inFlight.size &&
+        remaining > 0
+      ) {
+        const w = spawnPoolWorker();
+        if (!w) break; // can't spawn; rely on surviving workers (or settle if none)
         assign(w);
       }
-    });
-  } finally {
-    store.close();
-  }
+    };
+
+    const spawnPoolWorker = (): PoolWorker | null => {
+      const w = spawn();
+      if (!w) return null;
+      workers.add(w);
+      w.on("message", (r: WorkerResult) => {
+        // A real result clears this worker's in-flight task.
+        inFlight.delete(w);
+        try {
+          handleResult(r);
+        } catch (err) {
+          // Scoring/storage hiccup for one config: log and move on, don't kill the sweep.
+          process.stderr.write(
+            `\n[sweep] result-handling error: ${err instanceof Error ? err.message : String(err)}\n`,
+          );
+        }
+        assign(w);
+      });
+      w.on("error", (err) => {
+        // Async worker failure (e.g. uncaught throw running a battle). Requeue its
+        // in-flight task so a healthy worker reruns it; the 'exit' that follows tears
+        // this worker down. One bad config does NOT abort the sweep.
+        const idx = inFlight.get(w);
+        process.stderr.write(
+          `\n[sweep] worker error${idx !== undefined ? ` (config seed=${tasks[idx]!.seed})` : ""}: ${
+            err instanceof Error ? err.message : String(err)
+          }\n`,
+        );
+        if (idx !== undefined && !isStopped()) requeue.push(idx);
+        inFlight.delete(w);
+      });
+      w.on("exit", (code) => {
+        // The critical no-hang guarantee. A worker can die WITHOUT ever emitting
+        // 'error' (premature clean exit, OOM kill, native abort). If it still owned a
+        // task, requeue it; then drop the worker, top the pool back up, and re-check
+        // for completion. Because every exit funnels through here, `active` can never
+        // get stuck and the promise always eventually settles.
+        const idx = inFlight.get(w);
+        inFlight.delete(w);
+        workers.delete(w);
+        w.removeAllListeners();
+        if (idx !== undefined && !isStopped()) {
+          if (code !== 0) {
+            process.stderr.write(
+              `\n[sweep] worker exited code=${code} mid-task (config seed=${tasks[idx]!.seed}); reassigning\n`,
+            );
+          }
+          // Requeue only if not already requeued by a preceding 'error' handler.
+          if (!requeue.includes(idx)) requeue.push(idx);
+        }
+        replenish();
+        maybeFinish();
+      });
+      return w;
+    };
+
+    // Spin up the initial pool, capped at the task count.
+    const initial = Math.min(concurrency, tasks.length);
+    for (let i = 0; i < initial; i++) {
+      const w = spawnPoolWorker();
+      if (!w) break; // spawn failed; fall through to whatever workers we got
+      assign(w);
+    }
+    // If not a single worker could spawn, run inline-equivalent so we never hang.
+    // (Determinism-equivalent to the worker path: same runOne, same order.)
+    if (workers.size === 0) drainInlineAndSettle();
+  });
 }
 
 function bestScore(store: Store, batchId: string): number {
   const top = store.topN(1, batchId);
   return top[0]?.score ?? 0;
-}
-
-/**
- * Compute the score threshold for the top-N logs: the Nth-highest score across
- * both already-stored rows for this batch and the in-flight buffer. Below this,
- * a log need not be persisted.
- */
-function topNScoreThreshold(
-  store: Store,
-  batchId: string,
-  n: number,
-  buffer: ResultRow[],
-): number {
-  const stored = store.topN(n, batchId).map((r) => r.score);
-  const pending = buffer.map((r) => r.score);
-  const scores = [...stored, ...pending].sort((a, b) => b - a);
-  if (scores.length < n) return -Infinity; // top-N not yet full: keep everything
-  return scores[n - 1]!;
 }
