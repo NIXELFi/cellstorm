@@ -5,3 +5,8 @@ dist/
 out/
 data/
 *.tsbuildinfo
+# tsc -b declaration output should never be committed from source trees
+packages/**/src/**/*.d.ts
+packages/**/test/**/*.d.ts
+apps/**/src/**/*.d.ts
+apps/**/test/**/*.d.ts
