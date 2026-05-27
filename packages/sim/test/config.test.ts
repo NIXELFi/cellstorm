@@ -11,4 +11,9 @@ describe("normalizeConfig", () => {
   it("rejects powers length != teamCount", () => {
     expect(() => normalizeConfig({ seed: 1, teamCount: 2, powers: ["Tank"] })).toThrow();
   });
+  it("rejects totalCells too small for teamCount", () => {
+    expect(() =>
+      normalizeConfig({ seed: 1, teamCount: 6, powers: ["Tank", "Plague", "Sniper", "Swift", "Brute", "Bomb"], totalCells: 2 })
+    ).toThrow(/totalCells too small/);
+  });
 });

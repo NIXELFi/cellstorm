@@ -16,11 +16,15 @@ export function normalizeConfig(input: BattleConfigInput): BattleConfig {
   if (input.teamCount < 2 || input.teamCount > 6) {
     throw new Error(`teamCount must be 2..6, got ${input.teamCount}`);
   }
+  const totalCells = input.totalCells ?? DEFAULTS.totalCells;
+  if (Math.round(totalCells / input.teamCount) < 1) {
+    throw new Error("totalCells too small for teamCount");
+  }
   return {
     seed: input.seed,
     teamCount: input.teamCount,
     powers: input.powers,
-    totalCells: input.totalCells ?? DEFAULTS.totalCells,
+    totalCells,
     arena: input.arena ?? { ...DEFAULTS.arena },
     maxTicks: input.maxTicks ?? DEFAULTS.maxTicks,
   };
