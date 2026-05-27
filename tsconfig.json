@@ -1,6 +1,7 @@
 {
   "files": [],
   "references": [
-    { "path": "./packages/sim" }
+    { "path": "./packages/sim" },
+    { "path": "./packages/score" }
   ]
 }
