@@ -103,13 +103,14 @@ export function abilitiesSystem(w: World, sink: EventSink): void {
     const pT = w.teamPowers[t]!;
     if (!pT.pull) continue;
     const pR2 = pT.pullR! * pT.pullR!;
+    const win = Math.ceil(pT.pullR! / GRID_SIZE);
     for (let i = 0; i < w.cells.length; i++) {
       const m = w.cells[i]!;
       if (!m.alive || m.team !== t) continue;
       const gx = Math.floor(m.x / GRID_SIZE);
       const gy = Math.floor(m.y / GRID_SIZE);
-      for (let dgy = -2; dgy <= 2; dgy++) {
-        for (let dgx = -2; dgx <= 2; dgx++) {
+      for (let dgy = -win; dgy <= win; dgy++) {
+        for (let dgx = -win; dgx <= win; dgx++) {
           const ngx = gx + dgx, ngy = gy + dgy;
           if (ngx < 0 || ngx >= w.gw || ngy < 0 || ngy >= w.gh) continue;
           const list = w.grid[ngy * w.gw + ngx]!;
