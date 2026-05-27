@@ -1,4 +1,13 @@
 import { type World } from "../world";
+import type { Cell } from "../types";
+
+/** Wall bounce: clamp position to arena bounds and reflect velocity inward. */
+function clampToArena(c: Cell, W: number, H: number): void {
+  if (c.x < c.radius) { c.x = c.radius; c.vx = Math.abs(c.vx); }
+  if (c.x > W - c.radius) { c.x = W - c.radius; c.vx = -Math.abs(c.vx); }
+  if (c.y < c.radius) { c.y = c.radius; c.vy = Math.abs(c.vy); }
+  if (c.y > H - c.radius) { c.y = H - c.radius; c.vy = -Math.abs(c.vy); }
+}
 
 /**
  * Per-cell movement: applies state-driven steering forces, then integrates
@@ -18,10 +27,7 @@ export function movementSystem(w: World): void {
       c.stunT--;
       c.vx *= 0.82; c.vy *= 0.82;
       c.x += c.vx; c.y += c.vy;
-      if (c.x < c.radius) { c.x = c.radius; c.vx = Math.abs(c.vx); }
-      if (c.x > W - c.radius) { c.x = W - c.radius; c.vx = -Math.abs(c.vx); }
-      if (c.y < c.radius) { c.y = c.radius; c.vy = Math.abs(c.vy); }
-      if (c.y > H - c.radius) { c.y = H - c.radius; c.vy = -Math.abs(c.vy); }
+      clampToArena(c, W, H);
       continue;
     }
 
@@ -65,9 +71,6 @@ export function movementSystem(w: World): void {
       const s = vmax / Math.sqrt(vm2);
       c.vx *= s; c.vy *= s;
     }
-    if (c.x < c.radius) { c.x = c.radius; c.vx = Math.abs(c.vx); }
-    if (c.x > W - c.radius) { c.x = W - c.radius; c.vx = -Math.abs(c.vx); }
-    if (c.y < c.radius) { c.y = c.radius; c.vy = Math.abs(c.vy); }
-    if (c.y > H - c.radius) { c.y = H - c.radius; c.vy = -Math.abs(c.vy); }
+    clampToArena(c, W, H);
   }
 }
