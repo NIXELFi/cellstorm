@@ -20,7 +20,9 @@ export interface World {
   nextId: number;
   winner: number;            // -2 unresolved, -1 tie/extinct, >=0 team
   lastChangeFrame: number;   // for stalemate detection
-  prevTotal?: number;        // last observed total alive count (stalemate detection)
+  deathCount: number;        // monotonic count of deaths (stalemate detection)
+  prevDeathCount: number;    // deathCount observed at lastChangeFrame
+  leader: number;            // -1 none, >=0 team with the current lead
 }
 
 export function makeCell(w: World, team: number, x: number, y: number): Cell {
@@ -47,6 +49,7 @@ export function createWorld(cfg: BattleConfig): World {
     cfg, prng, teamPowers: cfg.powers.map(powerByName),
     cells: [], projectiles: [], corpses: [], pending: [],
     grid, gw, gh, frame: 0, nextId: 0, winner: -2, lastChangeFrame: 0,
+    deathCount: 0, prevDeathCount: 0, leader: -1,
   };
   const perTeam = Math.round(cfg.totalCells / cfg.teamCount);
   for (let t = 0; t < cfg.teamCount; t++) {

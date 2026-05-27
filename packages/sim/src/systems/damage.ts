@@ -5,6 +5,7 @@ import type { EventSink } from "../events";
 export function handleDeath(w: World, sink: EventSink, c: Cell, killer: Cell | null): void {
   if (!c.alive) return;
   c.alive = false;
+  w.deathCount++;
   sink.death(c.id, c.x, c.y, c.team);
   w.corpses.push({ x: c.x, y: c.y, team: c.team, age: 0 });
   if (w.corpses.length > 220) w.corpses.shift();

@@ -23,9 +23,24 @@ export function step(w: World, sink: EventSink): boolean {
 
   const counts = teamCounts(w);
   const live = counts.filter((n) => n > 0).length;
-  const totalAlive = counts.reduce((a, b) => a + b, 0);
-  if (w.prevTotal === undefined || totalAlive !== w.prevTotal) {
-    w.prevTotal = totalAlive; w.lastChangeFrame = w.frame;
+
+  // Lead-change detection: leader is the team with the max alive count.
+  // On a tie, keep the previous leader to avoid churn.
+  let max = -1, newLeader = w.leader;
+  for (let t = 0; t < counts.length; t++) {
+    const n = counts[t]!;
+    if (n > max) { max = n; newLeader = t; }
+  }
+  if (max > 0 && newLeader !== w.leader) {
+    w.leader = newLeader;
+    sink.leadChange(newLeader);
+  }
+
+  // Stalemate detection: reset the timer only when a DEATH occurred since the
+  // last tick. Spawning teams (Splitter/Necromancer) no longer keep the timer
+  // alive just by changing the total alive count.
+  if (w.deathCount > w.prevDeathCount) {
+    w.prevDeathCount = w.deathCount; w.lastChangeFrame = w.frame;
   }
   if (live <= 1) {
     w.winner = live === 1 ? counts.findIndex((n) => n > 0) : -1;
