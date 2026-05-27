@@ -1,6 +1,6 @@
 import Database from "better-sqlite3";
 import { gzipSync, gunzipSync } from "node:zlib";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import type { BattleConfig, BattleLog } from "@cellstorm/sim";
 
@@ -82,6 +82,9 @@ export class Store {
   private _insertStmt?: Database.Statement;
   private insertStmt(): Database.Statement {
     if (!this._insertStmt) {
+      // INSERT OR REPLACE: a re-run of the same configId (same teamCount:powers:seed)
+      // overwrites the prior row. This is the intended cross-batch overwrite semantic —
+      // resume is idempotent and a config is only ever stored once. The latest batch wins.
       this._insertStmt = this.db.prepare(
         `INSERT OR REPLACE INTO results
          (configId, config, score, breakdown, winner, durationTicks, batchId)
@@ -144,7 +147,28 @@ export class Store {
     return JSON.parse(gunzipSync(gz).toString("utf8")) as BattleLog;
   }
 
+  /** Delete a cached log if present (used to prune below the final top-N threshold). */
+  deleteLog(id: string): void {
+    const path = join(this.logsDir, `${id}.json.gz`);
+    if (existsSync(path)) rmSync(path);
+  }
+
+  /** All configIds that currently have a cached `.json.gz` log on disk. */
+  cachedLogIds(): string[] {
+    if (!existsSync(this.logsDir)) return [];
+    return readdirSync(this.logsDir)
+      .filter((f) => f.endsWith(".json.gz"))
+      .map((f) => f.slice(0, -".json.gz".length));
+  }
+
   close(): void {
+    // Fold the WAL back into the main db and drop the -wal/-shm sidecars so they
+    // don't persist or grow when another process (e.g. the harness) opens the db.
+    try {
+      this.db.pragma("wal_checkpoint(TRUNCATE)");
+    } catch {
+      // best-effort; a failed checkpoint must not block close
+    }
     this.db.close();
   }
 }

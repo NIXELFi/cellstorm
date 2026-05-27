@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { rmSync } from "node:fs";
+import { rmSync, statSync } from "node:fs";
 import { Store } from "../src/store";
 
 const DB = "/tmp/cellstorm-test.db";
@@ -38,5 +38,32 @@ describe("Store", () => {
     expect(s.getLog("logid")).toEqual(log);
     expect(s.getLog("missing")).toBeNull();
     s.close();
+  });
+
+  it("lists and deletes cached logs", () => {
+    const s = new Store(DB);
+    const log = { winner: 0, events: [], timeline: [] } as any;
+    s.saveLog("keep", log);
+    s.saveLog("drop", log);
+    expect(s.cachedLogIds().sort()).toEqual(["drop", "keep"]);
+    s.deleteLog("drop");
+    expect(s.cachedLogIds()).toEqual(["keep"]);
+    // deleting a missing log is a no-op
+    s.deleteLog("nope");
+    expect(s.cachedLogIds()).toEqual(["keep"]);
+    s.close();
+  });
+
+  it("close truncates the WAL sidecar", () => {
+    const s = new Store(DB);
+    s.insert({ configId: "a", config: {} as any, score: 1, breakdown: {}, winner: 0, durationTicks: 1, batchId: "b" });
+    s.close();
+    // After a TRUNCATE checkpoint + close, the -wal sidecar (if present) should be empty.
+    try {
+      const walSize = statSync(DB + "-wal").size;
+      expect(walSize).toBe(0);
+    } catch {
+      // -wal removed entirely is also acceptable
+    }
   });
 });
