@@ -1,0 +1,770 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cellular Battle Royale</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: #08070d;
+    color: #e8e8ec;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 24px 16px;
+  }
+  h1 {
+    margin: 0 0 16px;
+    font-size: 22px;
+    font-weight: 500;
+    text-align: center;
+    letter-spacing: 0.02em;
+  }
+  .container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+  }
+  .frame {
+    position: relative;
+    width: 280px;
+    height: 498px;
+    background: #050008;
+    border-radius: 18px;
+    overflow: hidden;
+    border: 1px solid rgba(255,255,255,0.18);
+    box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+  }
+  .frame canvas { display: block; width: 100%; height: 100%; }
+  .overlay-top {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    padding: 12px 10px 8px;
+    background: linear-gradient(rgba(0,0,0,0.7), rgba(0,0,0,0));
+    pointer-events: none;
+  }
+  .title {
+    color: rgba(255,255,255,0.95);
+    font-size: 13px;
+    font-weight: 500;
+    letter-spacing: 0.05em;
+    text-align: center;
+    margin-bottom: 8px;
+    text-shadow: 0 1px 4px rgba(0,0,0,0.7);
+  }
+  #stats {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 6px 4px;
+  }
+  .stat { text-align: center; }
+  .stat .cnt { font-size: 17px; font-weight: 500; line-height: 1; }
+  .stat .pwr {
+    font-size: 11px;
+    letter-spacing: 0.03em;
+    margin-top: 2px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  #winner {
+    position: absolute;
+    left: 0; right: 0;
+    top: 44%;
+    text-align: center;
+    font-size: 26px;
+    font-weight: 500;
+    letter-spacing: 0.12em;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.4s;
+    text-shadow: 0 2px 12px rgba(0,0,0,0.9);
+  }
+  .controls {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  button {
+    background: transparent;
+    color: #e8e8ec;
+    border: 1px solid rgba(255,255,255,0.22);
+    border-radius: 8px;
+    padding: 7px 14px;
+    font-size: 13px;
+    font-family: inherit;
+    cursor: pointer;
+    transition: background 0.15s, transform 0.1s;
+  }
+  button:hover { background: rgba(255,255,255,0.07); }
+  button:active { transform: scale(0.97); }
+  .teamctl {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    color: #a0a0ad;
+    font-size: 13px;
+  }
+  .teamctl button { padding: 5px 12px; min-width: 36px; font-size: 16px; }
+  #tCount { font-size: 14px; font-weight: 500; min-width: 18px; text-align: center; color: #e8e8ec; }
+  .info {
+    max-width: 360px;
+    color: #80808d;
+    font-size: 12px;
+    line-height: 1.6;
+    text-align: center;
+    margin-top: 4px;
+  }
+</style>
+</head>
+<body>
+<h1>Cellular Battle Royale</h1>
+<div class="container">
+  <div class="frame">
+    <canvas id="bf" width="280" height="498"></canvas>
+    <div class="overlay-top">
+      <div class="title">Who survives?</div>
+      <div id="stats"></div>
+    </div>
+    <div id="winner">—</div>
+  </div>
+  <div class="controls">
+    <button id="newBtn">↻ New battle</button>
+    <button id="playBtn">⏸ Pause</button>
+  </div>
+  <div class="teamctl">
+    <span>Teams</span>
+    <button id="tMinus">−</button>
+    <span id="tCount">4</span>
+    <button id="tPlus">+</button>
+  </div>
+  <div class="info">20 powers · randomly assigned each match · 2–6 teams</div>
+</div>
+<script>
+(function() {
+  const canvas = document.getElementById('bf');
+  const ctx = canvas.getContext('2d');
+  const W = 280, H = 498;
+
+  const TEAMS = [
+    { name: 'Red',    color: '#ff5066' },
+    { name: 'Blue',   color: '#5099ff' },
+    { name: 'Gold',   color: '#ffcc40' },
+    { name: 'Green',  color: '#4ade80' },
+    { name: 'Purple', color: '#c084fc' },
+    { name: 'Cyan',   color: '#22d3ee' }
+  ];
+
+  const POWERS = [
+    { name: 'Berserker',   speed: 1.45, damage: 1.6, aggro: true },
+    { name: 'Tank',        hp: 2.4, speed: 0.6, radius: 1.35, damage: 1.2, hold: true },
+    { name: 'Vampire',     heal: 0.85, healer: true },
+    { name: 'Splitter',    multiply: 0.55 },
+    { name: 'Bomb',        explode: true, aggro: true },
+    { name: 'Swift',       speed: 1.85, hp: 0.75 },
+    { name: 'Brute',       damage: 2, speed: 0.9, radius: 1.15, aggro: true },
+    { name: 'Sniper',      shoot: true, shootCD: 55, projDamage: 3.5, projSpeed: 4.2, hp: 0.8 },
+    { name: 'Magnet',      pull: true, pullR: 60, hp: 1.1 },
+    { name: 'Necromancer', revive: true, reviveCD: 90, hp: 0.9 },
+    { name: 'Plague',      infect: 200, plagueDPS: 0.07 },
+    { name: 'Shielder',    dmgReduce: 0.5, speed: 0.85 },
+    { name: 'Regen',       regen: 0.18, hp: 1.2 },
+    { name: 'Frenzy',      frenzy: true, speed: 1.1 },
+    { name: 'Lifebloom',   auraHeal: 0.35, auraR: 32, damage: 0.85 },
+    { name: 'Charger',     charge: true, chargeCD: 75, chargeBurst: 3.2, chargeForce: 2.6, aggro: true },
+    { name: 'Goliath',     radius: 2.4, hp: 3.5, damage: 2, speed: 0.48, hold: true },
+    { name: 'Reflector',   reflect: 0.55, hp: 1.3, speed: 0.85 },
+    { name: 'Stunner',     stun: 26, speed: 1.05 },
+    { name: 'Glasshammer', damage: 3.3, hp: 0.42, speed: 1.3, aggro: true }
+  ];
+
+  const GRID_SIZE = 14;
+  const GW = Math.ceil(W / GRID_SIZE);
+  const GH = Math.ceil(H / GRID_SIZE);
+  const grid = [];
+  for (let i = 0; i < GW * GH; i++) grid.push([]);
+
+  let cells = [];
+  let particles = [];
+  let projectiles = [];
+  let corpses = [];
+  let pending = [];
+  let teamPowers = [];
+  let teamCount = 4;
+  let winner = -1;
+  let frameCount = 0;
+
+  function newCell(t, x, y) {
+    const p = teamPowers[t];
+    const hp = 45 * (p.hp || 1);
+    return {
+      x, y,
+      vx: (Math.random() - 0.5) * 0.5,
+      vy: (Math.random() - 0.5) * 0.5,
+      hp, maxHp: hp,
+      team: t,
+      radius: 3 * (p.radius || 1),
+      alive: true,
+      state: 'engage',
+      tx: null, ty: null, acx: null, acy: null, avx: 0, avy: 0,
+      stunT: 0, plagueT: 0,
+      cdShoot: Math.floor(Math.random() * 30),
+      cdCharge: Math.floor(Math.random() * 40),
+      cdRevive: Math.floor(Math.random() * 60),
+      dash: 0
+    };
+  }
+
+  function cloneCell(c) {
+    const n = newCell(c.team, c.x + (Math.random() - 0.5) * 8, c.y + (Math.random() - 0.5) * 8);
+    n.vx = (Math.random() - 0.5) * 1.6;
+    n.vy = (Math.random() - 0.5) * 1.6;
+    return n;
+  }
+
+  function rebuildStats() {
+    const el = document.getElementById('stats');
+    el.innerHTML = '';
+    el.style.gridTemplateColumns = teamCount <= 3 ? 'repeat(' + teamCount + ', 1fr)' : 'repeat(3, 1fr)';
+    for (let t = 0; t < teamCount; t++) {
+      const box = document.createElement('div');
+      box.className = 'stat';
+      const cnt = document.createElement('div');
+      cnt.className = 'cnt';
+      cnt.id = 'cnt' + t;
+      cnt.style.color = TEAMS[t].color;
+      cnt.textContent = '0';
+      const pwr = document.createElement('div');
+      pwr.className = 'pwr';
+      pwr.id = 'pwr' + t;
+      pwr.style.color = TEAMS[t].color + 'cc';
+      pwr.textContent = '—';
+      box.appendChild(cnt);
+      box.appendChild(pwr);
+      el.appendChild(box);
+    }
+  }
+
+  function init() {
+    cells = [];
+    particles = [];
+    projectiles = [];
+    corpses = [];
+    pending = [];
+    winner = -1;
+    frameCount = 0;
+    document.getElementById('winner').style.opacity = '0';
+    teamPowers = [];
+    const pool = POWERS.slice().sort(() => Math.random() - 0.5);
+    for (let t = 0; t < teamCount; t++) teamPowers.push(pool[t]);
+    rebuildStats();
+    const perTeam = Math.round(900 / teamCount);
+    for (let t = 0; t < teamCount; t++) {
+      const angle = (t / teamCount) * Math.PI * 2 - Math.PI / 2;
+      const r = Math.min(W, H) * 0.34;
+      const tcx = W / 2 + Math.cos(angle) * r;
+      const tcy = H / 2 + Math.sin(angle) * r;
+      for (let i = 0; i < perTeam; i++) {
+        const a = Math.random() * Math.PI * 2;
+        const rr = Math.sqrt(Math.random()) * 26;
+        cells.push(newCell(t, tcx + Math.cos(a) * rr, tcy + Math.sin(a) * rr));
+      }
+    }
+    refreshUI();
+  }
+
+  function refreshUI() {
+    const counts = new Array(teamCount).fill(0);
+    for (let i = 0; i < cells.length; i++) if (cells[i].alive) counts[cells[i].team]++;
+    for (let t = 0; t < teamCount; t++) {
+      const cnt = document.getElementById('cnt' + t);
+      const pwr = document.getElementById('pwr' + t);
+      if (cnt) cnt.textContent = counts[t];
+      if (pwr) pwr.textContent = teamPowers[t].name.toLowerCase();
+    }
+    let live = 0, lastLive = -1;
+    for (let t = 0; t < teamCount; t++) if (counts[t] > 0) { live++; lastLive = t; }
+    if (live <= 1 && winner < 0) {
+      winner = lastLive;
+      const wEl = document.getElementById('winner');
+      if (winner >= 0) {
+        wEl.textContent = TEAMS[winner].name + ' wins';
+        wEl.style.color = TEAMS[winner].color;
+      } else {
+        wEl.textContent = 'tie';
+        wEl.style.color = '#ffffff';
+      }
+      wEl.style.opacity = '1';
+    }
+  }
+
+  function spawnParticles(x, y, team, n) {
+    const col = TEAMS[team].color;
+    n = n || 5;
+    for (let i = 0; i < n; i++) {
+      particles.push({
+        x, y,
+        vx: (Math.random() - 0.5) * 4,
+        vy: (Math.random() - 0.5) * 4,
+        life: 16, maxLife: 16,
+        color: col
+      });
+    }
+  }
+
+  function explode(x, y, killerTeam) {
+    spawnParticles(x, y, killerTeam, 10);
+    for (let i = 0; i < cells.length; i++) {
+      const o = cells[i];
+      if (!o.alive || o.team === killerTeam) continue;
+      const dx = o.x - x, dy = o.y - y;
+      const d2 = dx * dx + dy * dy;
+      if (d2 < 800) {
+        const d = Math.sqrt(d2 + 0.01);
+        o.hp -= 7;
+        o.vx += (dx / d) * 1.6;
+        o.vy += (dy / d) * 1.6;
+        if (o.hp <= 0 && o.alive) handleDeath(o, null);
+      }
+    }
+  }
+
+  function handleDeath(c, killer) {
+    if (!c.alive) return;
+    c.alive = false;
+    spawnParticles(c.x, c.y, c.team);
+    corpses.push({ x: c.x, y: c.y, team: c.team, age: 0 });
+    if (corpses.length > 220) corpses.shift();
+    const pC = teamPowers[c.team];
+    if (killer && killer.alive) {
+      const pK = teamPowers[killer.team];
+      if (pK.multiply && Math.random() < pK.multiply && cells.length + pending.length < 1500) {
+        pending.push(cloneCell(killer));
+      }
+    }
+    if (pC.explode) explode(c.x, c.y, c.team);
+  }
+
+  function applyDamage(attacker, target, base) {
+    if (!target.alive) return;
+    const pA = attacker ? teamPowers[attacker.team] : null;
+    const pT = teamPowers[target.team];
+    let dmg = base * (pA ? (pA.damage || 1) : 1);
+    if (pA && pA.frenzy) dmg *= 1 + (1 - attacker.hp / attacker.maxHp) * 1.6;
+    if (pT.dmgReduce) dmg *= (1 - pT.dmgReduce);
+    target.hp -= dmg;
+    if (pT.reflect && attacker && attacker.alive) {
+      attacker.hp -= dmg * pT.reflect;
+      if (attacker.hp <= 0) handleDeath(attacker, target);
+    }
+    if (pA && pA.heal && attacker.alive) attacker.hp = Math.min(attacker.maxHp, attacker.hp + pA.heal);
+    if (pA && pA.infect) target.plagueT = Math.max(target.plagueT, pA.infect);
+    if (pA && pA.stun) target.stunT = Math.max(target.stunT, pA.stun);
+    if (target.hp <= 0) handleDeath(target, attacker);
+  }
+
+  function step() {
+    frameCount++;
+    for (let i = 0; i < grid.length; i++) grid[i].length = 0;
+    for (let i = 0; i < cells.length; i++) {
+      const c = cells[i];
+      if (!c.alive) continue;
+      let gx = Math.floor(c.x / GRID_SIZE);
+      let gy = Math.floor(c.y / GRID_SIZE);
+      if (gx < 0) gx = 0; else if (gx >= GW) gx = GW - 1;
+      if (gy < 0) gy = 0; else if (gy >= GH) gy = GH - 1;
+      grid[gy * GW + gx].push(i);
+    }
+
+    for (let i = 0; i < cells.length; i++) {
+      const c = cells[i];
+      if (!c.alive) continue;
+      const p = teamPowers[c.team];
+      const speedMult = p.speed || 1;
+
+      if (c.stunT > 0) {
+        c.stunT--;
+        c.vx *= 0.82; c.vy *= 0.82;
+        c.x += c.vx; c.y += c.vy;
+        if (c.x < c.radius) { c.x = c.radius; c.vx = Math.abs(c.vx); }
+        if (c.x > W - c.radius) { c.x = W - c.radius; c.vx = -Math.abs(c.vx); }
+        if (c.y < c.radius) { c.y = c.radius; c.vy = Math.abs(c.vy); }
+        if (c.y > H - c.radius) { c.y = H - c.radius; c.vy = -Math.abs(c.vy); }
+        continue;
+      }
+      if (c.plagueT > 0) {
+        c.plagueT--;
+        c.hp -= 0.07;
+        if (c.hp <= 0) { handleDeath(c, null); continue; }
+      }
+      if (p.regen && c.hp < c.maxHp) c.hp = Math.min(c.maxHp, c.hp + p.regen);
+
+      if ((frameCount + i) % 8 === 0) {
+        const gx = Math.floor(c.x / GRID_SIZE);
+        const gy = Math.floor(c.y / GRID_SIZE);
+        let allyCount = 0, enemyCount = 0;
+        let acx = 0, acy = 0, avx = 0, avy = 0;
+        let bestTX = 0, bestTY = 0, bestScore = -1;
+        const SR2 = 2500;
+        for (let dgy = -3; dgy <= 3; dgy++) {
+          for (let dgx = -3; dgx <= 3; dgx++) {
+            const ngx = gx + dgx, ngy = gy + dgy;
+            if (ngx < 0 || ngx >= GW || ngy < 0 || ngy >= GH) continue;
+            const list = grid[ngy * GW + ngx];
+            for (let k = 0; k < list.length; k++) {
+              const o = cells[list[k]];
+              if (!o.alive || o === c) continue;
+              const dx = o.x - c.x, dy = o.y - c.y;
+              const d2 = dx * dx + dy * dy;
+              if (d2 > SR2) continue;
+              if (o.team === c.team) {
+                allyCount++;
+                acx += o.x; acy += o.y;
+                avx += o.vx; avy += o.vy;
+              } else {
+                enemyCount++;
+                const score = (3500 / (d2 + 60)) + (1 - o.hp / o.maxHp) * 5;
+                if (score > bestScore) {
+                  bestScore = score;
+                  bestTX = o.x; bestTY = o.y;
+                }
+              }
+            }
+          }
+        }
+        if (allyCount > 0) {
+          acx /= allyCount; acy /= allyCount;
+          avx /= allyCount; avy /= allyCount;
+        }
+        const hpFrac = c.hp / c.maxHp;
+        let state = enemyCount > 0 ? 'engage' : 'hunt';
+        if (p.aggro) state = 'engage';
+        else if (p.healer && hpFrac < 0.95 && enemyCount > 0) state = 'engage';
+        else if (!p.hold && hpFrac < 0.28 && allyCount > 0) state = 'retreat';
+        else if (!p.hold && !p.aggro && enemyCount > allyCount + 2 && allyCount > 1) state = 'regroup';
+        c.state = state;
+        c.tx = bestScore > -1 ? bestTX : null;
+        c.ty = bestScore > -1 ? bestTY : null;
+        c.acx = allyCount > 0 ? acx : null;
+        c.acy = allyCount > 0 ? acy : null;
+        c.avx = avx; c.avy = avy;
+      }
+
+      const state = c.state;
+      if (state === 'engage' && c.tx !== null) {
+        const dx = c.tx - c.x, dy = c.ty - c.y;
+        const d = Math.sqrt(dx * dx + dy * dy) + 0.01;
+        const f = (p.aggro ? 0.30 : 0.20) * speedMult;
+        c.vx += (dx / d) * f;
+        c.vy += (dy / d) * f;
+      } else if (state === 'retreat' && c.acx !== null) {
+        const dx = c.acx - c.x, dy = c.acy - c.y;
+        const d = Math.sqrt(dx * dx + dy * dy) + 0.01;
+        c.vx += (dx / d) * 0.32 * speedMult;
+        c.vy += (dy / d) * 0.32 * speedMult;
+        if (c.tx !== null) {
+          const ex = c.x - c.tx, ey = c.y - c.ty;
+          const ed = Math.sqrt(ex * ex + ey * ey) + 0.01;
+          c.vx += (ex / ed) * 0.18 * speedMult;
+          c.vy += (ey / ed) * 0.18 * speedMult;
+        }
+      } else if (state === 'regroup' && c.acx !== null) {
+        const dx = c.acx - c.x, dy = c.acy - c.y;
+        const d = Math.sqrt(dx * dx + dy * dy) + 0.01;
+        c.vx += (dx / d) * 0.20 * speedMult;
+        c.vy += (dy / d) * 0.20 * speedMult;
+      } else {
+        c.vx += (Math.random() - 0.5) * 0.35 * speedMult;
+        c.vy += (Math.random() - 0.5) * 0.35 * speedMult;
+      }
+      if (c.acx !== null && state !== 'retreat') {
+        c.vx += (c.avx - c.vx) * 0.04;
+        c.vy += (c.avy - c.vy) * 0.04;
+      }
+
+      if (p.shoot) {
+        if (c.cdShoot > 0) c.cdShoot--;
+        else if (c.tx !== null) {
+          const dx = c.tx - c.x, dy = c.ty - c.y;
+          const d = Math.sqrt(dx * dx + dy * dy);
+          if (d < 95 && d > 6) {
+            projectiles.push({
+              x: c.x, y: c.y,
+              vx: (dx / d) * p.projSpeed,
+              vy: (dy / d) * p.projSpeed,
+              team: c.team,
+              damage: p.projDamage,
+              life: 28
+            });
+            c.cdShoot = p.shootCD;
+          }
+        }
+      }
+
+      if (p.charge) {
+        if (c.cdCharge > 0) c.cdCharge--;
+        else if (c.tx !== null) {
+          const dx = c.tx - c.x, dy = c.ty - c.y;
+          const d = Math.sqrt(dx * dx + dy * dy);
+          if (d < 40 && d > 4) {
+            c.vx += (dx / d) * p.chargeForce;
+            c.vy += (dy / d) * p.chargeForce;
+            c.dash = 10;
+            c.cdCharge = p.chargeCD;
+          }
+        }
+      }
+      if (c.dash > 0) c.dash--;
+
+      if (p.revive) {
+        if (c.cdRevive > 0) c.cdRevive--;
+        else {
+          for (let k = corpses.length - 1; k >= 0; k--) {
+            const cp = corpses[k];
+            if (cp.team !== c.team) continue;
+            const dx = cp.x - c.x, dy = cp.y - c.y;
+            if (dx * dx + dy * dy < 60 * 60) {
+              if (cells.length + pending.length < 1500) {
+                const n = newCell(c.team, cp.x, cp.y);
+                n.hp = n.maxHp * 0.5;
+                pending.push(n);
+                corpses.splice(k, 1);
+                c.cdRevive = p.reviveCD;
+                break;
+              }
+            }
+          }
+        }
+      }
+
+      if (p.auraHeal && frameCount % 4 === 0) {
+        const gx = Math.floor(c.x / GRID_SIZE);
+        const gy = Math.floor(c.y / GRID_SIZE);
+        const aR2 = p.auraR * p.auraR;
+        for (let dgy = -3; dgy <= 3; dgy++) {
+          for (let dgx = -3; dgx <= 3; dgx++) {
+            const ngx = gx + dgx, ngy = gy + dgy;
+            if (ngx < 0 || ngx >= GW || ngy < 0 || ngy >= GH) continue;
+            const list = grid[ngy * GW + ngx];
+            for (let kk = 0; kk < list.length; kk++) {
+              const o = cells[list[kk]];
+              if (!o.alive || o.team !== c.team || o === c) continue;
+              const dx = o.x - c.x, dy = o.y - c.y;
+              if (dx * dx + dy * dy < aR2) {
+                o.hp = Math.min(o.maxHp, o.hp + p.auraHeal);
+              }
+            }
+          }
+        }
+      }
+
+      c.x += c.vx; c.y += c.vy;
+      c.vx *= 0.93; c.vy *= 0.93;
+      const vm2 = c.vx * c.vx + c.vy * c.vy;
+      const vmax = 2.6 * speedMult * (c.dash > 0 ? 1.5 : 1);
+      if (vm2 > vmax * vmax) {
+        const s = vmax / Math.sqrt(vm2);
+        c.vx *= s; c.vy *= s;
+      }
+      if (c.x < c.radius) { c.x = c.radius; c.vx = Math.abs(c.vx); }
+      if (c.x > W - c.radius) { c.x = W - c.radius; c.vx = -Math.abs(c.vx); }
+      if (c.y < c.radius) { c.y = c.radius; c.vy = Math.abs(c.vy); }
+      if (c.y > H - c.radius) { c.y = H - c.radius; c.vy = -Math.abs(c.vy); }
+    }
+
+    for (let t = 0; t < teamCount; t++) {
+      const pT = teamPowers[t];
+      if (!pT.pull) continue;
+      for (let i = 0; i < cells.length; i++) {
+        const m = cells[i];
+        if (!m.alive || m.team !== t) continue;
+        const gx = Math.floor(m.x / GRID_SIZE);
+        const gy = Math.floor(m.y / GRID_SIZE);
+        const pR2 = pT.pullR * pT.pullR;
+        for (let dgy = -2; dgy <= 2; dgy++) {
+          for (let dgx = -2; dgx <= 2; dgx++) {
+            const ngx = gx + dgx, ngy = gy + dgy;
+            if (ngx < 0 || ngx >= GW || ngy < 0 || ngy >= GH) continue;
+            const list = grid[ngy * GW + ngx];
+            for (let kk = 0; kk < list.length; kk++) {
+              const o = cells[list[kk]];
+              if (!o.alive || o.team === m.team) continue;
+              const dx = m.x - o.x, dy = m.y - o.y;
+              const d2 = dx * dx + dy * dy;
+              if (d2 < pR2 && d2 > 36) {
+                const d = Math.sqrt(d2);
+                o.vx += (dx / d) * 0.07;
+                o.vy += (dy / d) * 0.07;
+              }
+            }
+          }
+        }
+      }
+    }
+
+    for (let pi = projectiles.length - 1; pi >= 0; pi--) {
+      const proj = projectiles[pi];
+      proj.x += proj.vx; proj.y += proj.vy;
+      proj.life--;
+      if (proj.life <= 0 || proj.x < 0 || proj.x > W || proj.y < 0 || proj.y > H) {
+        projectiles.splice(pi, 1);
+        continue;
+      }
+      const gx = Math.floor(proj.x / GRID_SIZE);
+      const gy = Math.floor(proj.y / GRID_SIZE);
+      let hit = false;
+      for (let dgy = -1; dgy <= 1 && !hit; dgy++) {
+        for (let dgx = -1; dgx <= 1 && !hit; dgx++) {
+          const ngx = gx + dgx, ngy = gy + dgy;
+          if (ngx < 0 || ngx >= GW || ngy < 0 || ngy >= GH) continue;
+          const list = grid[ngy * GW + ngx];
+          for (let kk = 0; kk < list.length; kk++) {
+            const o = cells[list[kk]];
+            if (!o.alive || o.team === proj.team) continue;
+            const dx = o.x - proj.x, dy = o.y - proj.y;
+            if (dx * dx + dy * dy < (o.radius + 2) * (o.radius + 2)) {
+              applyDamage(null, o, proj.damage);
+              hit = true;
+              spawnParticles(proj.x, proj.y, proj.team, 3);
+              break;
+            }
+          }
+        }
+      }
+      if (hit) projectiles.splice(pi, 1);
+    }
+
+    for (let i = 0; i < cells.length; i++) {
+      const c = cells[i];
+      if (!c.alive) continue;
+      const gx = Math.floor(c.x / GRID_SIZE);
+      const gy = Math.floor(c.y / GRID_SIZE);
+      for (let dgy = -1; dgy <= 1; dgy++) {
+        for (let dgx = -1; dgx <= 1; dgx++) {
+          const ngx = gx + dgx, ngy = gy + dgy;
+          if (ngx < 0 || ngx >= GW || ngy < 0 || ngy >= GH) continue;
+          const list = grid[ngy * GW + ngx];
+          for (let k = 0; k < list.length; k++) {
+            const j = list[k];
+            if (j <= i) continue;
+            const o = cells[j];
+            if (!o.alive) continue;
+            const dx = o.x - c.x, dy = o.y - c.y;
+            const d2 = dx * dx + dy * dy;
+            const sumR = c.radius + o.radius;
+            if (d2 < sumR * sumR && d2 > 0.01) {
+              const d = Math.sqrt(d2);
+              const ov = sumR - d;
+              const nx = dx / d, ny = dy / d;
+              c.x -= nx * ov * 0.5; c.y -= ny * ov * 0.5;
+              o.x += nx * ov * 0.5; o.y += ny * ov * 0.5;
+              if (c.team !== o.team) {
+                const pC = teamPowers[c.team];
+                const pO = teamPowers[o.team];
+                let baseC = 1.4;
+                let baseO = 1.4;
+                if (pC.charge && c.dash > 0) baseC = pC.chargeBurst;
+                if (pO.charge && o.dash > 0) baseO = pO.chargeBurst;
+                c.vx -= nx * 0.4; c.vy -= ny * 0.4;
+                o.vx += nx * 0.4; o.vy += ny * 0.4;
+                applyDamage(c, o, baseC);
+                if (c.alive) applyDamage(o, c, baseO);
+              }
+            }
+          }
+        }
+      }
+    }
+
+    for (let i = 0; i < pending.length; i++) cells.push(pending[i]);
+    pending.length = 0;
+
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i];
+      p.x += p.vx; p.y += p.vy;
+      p.vx *= 0.9; p.vy *= 0.9;
+      p.life--;
+      if (p.life <= 0) particles.splice(i, 1);
+    }
+    for (let i = corpses.length - 1; i >= 0; i--) {
+      corpses[i].age++;
+      if (corpses[i].age > 300) corpses.splice(i, 1);
+    }
+    if (frameCount % 5 === 0) refreshUI();
+  }
+
+  function render() {
+    ctx.fillStyle = 'rgba(6, 4, 14, 0.55)';
+    ctx.fillRect(0, 0, W, H);
+    for (let t = 0; t < teamCount; t++) {
+      ctx.fillStyle = TEAMS[t].color;
+      ctx.beginPath();
+      for (let i = 0; i < cells.length; i++) {
+        const c = cells[i];
+        if (!c.alive || c.team !== t) continue;
+        const r = c.radius * (0.55 + 0.45 * (c.hp / c.maxHp));
+        ctx.moveTo(c.x + r, c.y);
+        ctx.arc(c.x, c.y, r, 0, Math.PI * 2);
+      }
+      ctx.fill();
+      ctx.beginPath();
+      for (let i = 0; i < projectiles.length; i++) {
+        const p = projectiles[i];
+        if (p.team !== t) continue;
+        ctx.moveTo(p.x + 2, p.y);
+        ctx.arc(p.x, p.y, 2, 0, Math.PI * 2);
+      }
+      ctx.fill();
+    }
+    for (let i = 0; i < particles.length; i++) {
+      const p = particles[i];
+      ctx.fillStyle = p.color;
+      ctx.globalAlpha = p.life / p.maxLife;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 1.8, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  let running = true;
+  document.getElementById('newBtn').addEventListener('click', init);
+  document.getElementById('playBtn').addEventListener('click', (e) => {
+    running = !running;
+    e.currentTarget.textContent = running ? '⏸ Pause' : '▶ Play';
+  });
+  document.getElementById('tMinus').addEventListener('click', () => {
+    if (teamCount > 2) {
+      teamCount--;
+      document.getElementById('tCount').textContent = teamCount;
+      init();
+    }
+  });
+  document.getElementById('tPlus').addEventListener('click', () => {
+    if (teamCount < 6) {
+      teamCount++;
+      document.getElementById('tCount').textContent = teamCount;
+      init();
+    }
+  });
+
+  init();
+  function frame() {
+    if (running) step();
+    render();
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
