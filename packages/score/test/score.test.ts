@@ -4,7 +4,7 @@ import { DEFAULT_PROFILE } from "../src/types";
 import type { BattleLog } from "@cellstorm/sim";
 
 function log(partial: Partial<BattleLog>): BattleLog {
-  return { config: {} as any, events: [], timeline: [], durationTicks: 0, winner: 0, ...partial };
+  return { config: {} as any, events: [], timeline: [], durationTicks: 0, totalTicks: 0, winner: 0, ...partial };
 }
 
 describe("score gates", () => {

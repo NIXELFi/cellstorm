@@ -31,6 +31,7 @@ export class PlayerPanel {
   private rafId?: number;
   private scrub!: HTMLInputElement;
   private frameLabel!: HTMLElement;
+  private endFrame = -1; // total playback length (frames) once the battle has ended
   private renderCmd!: HTMLElement;
   private onPlayerReady?: (h: PlayerPanelHandle) => void;
 
@@ -91,6 +92,7 @@ export class PlayerPanel {
       this.app.renderer.resize(w, h);
     }
 
+    this.endFrame = -1; // reset playback-length tracking for the new battle
     this.player = new BattlePlayer(this.app, {
       config: this.config,
       hud: this.hud,
@@ -116,9 +118,13 @@ export class PlayerPanel {
 
   private syncScrub(): void {
     if (!this.player || !this.config) return;
-    this.scrub.max = String(this.config.maxTicks);
+    if (this.player.ended && this.endFrame < 0) this.endFrame = this.player.frame;
+    const total = this.endFrame > 0 ? this.endFrame : this.config.maxTicks;
+    this.scrub.max = String(total);
     this.scrub.value = String(this.player.frame);
-    this.frameLabel.textContent = `${this.player.frame}t${this.player.ended ? " (ended)" : ""}`;
+    const sec = (this.player.frame / 60).toFixed(1);
+    this.frameLabel.textContent =
+      this.endFrame > 0 ? `${sec}s / ${(this.endFrame / 60).toFixed(1)}s (ended)` : `${sec}s`;
   }
 
   private renderControls(): void {

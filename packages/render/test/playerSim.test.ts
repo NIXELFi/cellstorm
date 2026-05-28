@@ -24,7 +24,8 @@ describe("player sim loop matches runBattle (determinism contract)", () => {
       while (!ended) ended = advance(state, sink);
 
       expect(state.world.winner).toBe(expected.summary.winner);
-      expect(state.world.frame).toBe(expected.summary.durationTicks);
+      // Player plays through the victory-beat outro, so it ends at totalTicks (fight + outro).
+      expect(state.world.frame).toBe(expected.summary.totalTicks);
       // Event stream emitted while stepping is identical to the headless log.
       expect(sink.events).toEqual(expected.log.events);
     });
@@ -50,7 +51,7 @@ describe("player sim loop matches runBattle (determinism contract)", () => {
     const expected = runBattle(cfg);
     const sought = seekState(cfg, 10_000_000);
     expect(sought.ended).toBe(true);
-    expect(sought.world.frame).toBe(expected.summary.durationTicks);
+    expect(sought.world.frame).toBe(expected.summary.totalTicks);
   });
 });
 

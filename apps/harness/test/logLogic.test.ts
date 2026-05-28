@@ -8,6 +8,7 @@ function log(partial: Partial<BattleLog>): BattleLog {
     events: [],
     timeline: [],
     durationTicks: 0,
+    totalTicks: 0,
     winner: 0,
     ...partial,
   };

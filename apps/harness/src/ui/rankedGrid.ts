@@ -155,7 +155,10 @@ export class RankedGrid {
     }
     const seed = document.createElement("span");
     seed.className = "muted";
-    seed.textContent = `seed ${row.config.seed} · ${row.durationTicks}t`;
+    // Video length = fight duration + the victory-beat outro, in seconds @ 60fps.
+    const outro = row.config.outroTicks ?? 0;
+    const videoSec = (row.durationTicks + outro) / 60;
+    seed.textContent = `seed ${row.config.seed} · ${videoSec.toFixed(1)}s`;
     meta.append(winner, seed);
 
     const spark = document.createElement("canvas");

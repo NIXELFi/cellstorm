@@ -22,6 +22,7 @@ export const DEFAULTS = {
   totalCells: 900,
   arena: { width: 280, height: 498 },
   maxTicks: 60 * 75, // 75s @ 60fps hard cap
+  outroTicks: 48, // 0.8s victory beat after the last cell dies, so the wipe + win land on screen
 } as const;
 
 export type BattleConfigInput =
@@ -46,6 +47,7 @@ export function normalizeConfig(input: BattleConfigInput): BattleConfig {
     totalCells,
     arena: input.arena ?? { ...DEFAULTS.arena },
     maxTicks: input.maxTicks ?? DEFAULTS.maxTicks,
+    outroTicks: input.outroTicks ?? DEFAULTS.outroTicks,
     ai: { ...DEFAULT_AI, ...input.ai },
   };
 }

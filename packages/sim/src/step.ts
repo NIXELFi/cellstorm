@@ -40,15 +40,23 @@ export function step(w: World, sink: EventSink): boolean {
   if (w.deathCount > w.prevDeathCount) {
     w.prevDeathCount = w.deathCount; w.lastChangeFrame = w.frame;
   }
-  if (live <= 1) {
-    w.winner = live === 1 ? counts.findIndex((n) => n > 0) : -1;
-    sink.end(w.winner);
-    return true;
+
+  // Decide the winner exactly once, the frame the fight is actually over (last enemy dead, or a
+  // stalemate/cap). We do NOT stop here: the battle keeps stepping for `outroTicks` more frames
+  // so the final death bursts fade and the win lands on screen (no abrupt cut mid-wipe).
+  if (w.resolvedFrame < 0) {
+    const stalemate = w.frame - w.lastChangeFrame > w.cfg.ai.stalemateTicks || w.frame >= w.cfg.maxTicks;
+    if (live <= 1) {
+      w.winner = live === 1 ? counts.findIndex((n) => n > 0) : -1;
+      w.resolvedFrame = w.frame;
+      sink.end(w.winner);
+    } else if (stalemate) {
+      w.winner = -1;
+      w.resolvedFrame = w.frame;
+      sink.end(w.winner);
+    }
   }
-  if (w.frame - w.lastChangeFrame > w.cfg.ai.stalemateTicks || w.frame >= w.cfg.maxTicks) {
-    w.winner = -1; // unresolved/stalemate
-    sink.end(w.winner);
-    return true;
-  }
-  return false;
+
+  // End once the victory beat has played out.
+  return w.resolvedFrame >= 0 && w.frame >= w.resolvedFrame + w.cfg.outroTicks;
 }

@@ -58,6 +58,7 @@ export interface BattleConfig {
   totalCells: number;      // default 900
   arena: ArenaParams;      // default 280x498 (will scale at render time)
   maxTicks: number;        // hard cap
+  outroTicks: number;      // frames to keep playing after a winner is decided (victory beat)
   ai: AiParams;            // aggression / decisiveness tuning
 }
 

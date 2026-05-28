@@ -29,6 +29,7 @@ function log(winnerStart: number, winnerEnd: number, otherStart: number): Battle
     events,
     timeline,
     durationTicks,
+    totalTicks: durationTicks,
     winner,
   };
 }
