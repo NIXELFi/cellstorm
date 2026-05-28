@@ -22,6 +22,7 @@ const ABERRATION_BASE = 0.8; // px at rest
 const ABERRATION_MAX = 3.5; // px at full impact
 const SHAKE_LOGICAL = 2.0; // logical px of shake at full impact (multiplied by scale)
 const OVERSCAN = 0.015; // 1.5% zoom so a few px of shake never exposes the background edge
+const BLOOM_SCALE = 0.35; // bloom intensity at rest — kept low so it's a glow, not a haze
 
 export class PostFx {
   private readonly outer = new Container();
@@ -51,7 +52,8 @@ export class PostFx {
     this.baseY = -app.screen.height * OVERSCAN * 0.5;
     this.shake.position.set(this.baseX, this.baseY);
 
-    this.bloom = new AdvancedBloomFilter({ threshold: 0.4, bloomScale: 0.6, brightness: 1, blur: 4, quality: 4 });
+    // High threshold = only the brightest cores bloom; small blur = a tight glow, not a blur haze.
+    this.bloom = new AdvancedBloomFilter({ threshold: 0.6, bloomScale: BLOOM_SCALE, brightness: 1, blur: 2, quality: 4 });
     this.rgb = new RGBSplitFilter({ red: { x: ABERRATION_BASE, y: 0 }, green: { x: 0, y: 0 }, blue: { x: -ABERRATION_BASE, y: 0 } });
     this.grade = new AdjustmentFilter({ saturation: 1.12, contrast: 1.08, brightness: 1, gamma: 1 });
     // CRT filter used purely for its vignette (scanlines / noise / curvature all off).
@@ -71,7 +73,7 @@ export class PostFx {
     this.shake.position.set(this.baseX + dx, this.baseY + dy);
 
     this.grade.brightness = 1 + flash * 0.5; // brief pop on the winner reveal
-    this.bloom.bloomScale = 0.6 + flash * 0.5;
+    this.bloom.bloomScale = BLOOM_SCALE + flash * 0.3;
   }
 
   destroy(): void {
