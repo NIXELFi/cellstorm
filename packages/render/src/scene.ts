@@ -78,7 +78,8 @@ export class PixiScene {
       if (any) this.glowLayer.fill({ color: this.teamColor(t), alpha: 0.14 });
     }
 
-    // Cell layer: shape per team power, filled in team color, batched per team.
+    // Cell layer: shape per team power, filled in team color with a crisp dark outline so
+    // individual shapes stay legible inside same-color blobs. Batched per team.
     this.cellLayer.clear();
     for (let t = 0; t < teamCount; t++) {
       const shape = this.styles[t]!.shape;
@@ -88,7 +89,11 @@ export class PixiScene {
         addShape(this.cellLayer, shape, c.x * s, c.y * s, this.cellR(c) * s);
         any = true;
       }
-      if (any) this.cellLayer.fill({ color: this.teamColor(t), alpha: 1 });
+      if (any) {
+        this.cellLayer
+          .fill({ color: this.teamColor(t), alpha: 1 })
+          .stroke({ width: Math.max(0.6, 0.9 * s), color: this.darken(this.teamColor(t), 0.4), alpha: 0.95 });
+      }
     }
 
     // Projectiles: faint team-colored glow + bright white core.
@@ -160,7 +165,16 @@ export class PixiScene {
   }
 
   private cellR(c: { radius: number; hp: number; maxHp: number }): number {
-    return c.radius * (0.55 + 0.45 * (c.hp / c.maxHp));
+    // ~35% larger than the prototype so the bolder shapes actually read at small sizes.
+    return c.radius * (0.7 + 0.45 * (c.hp / c.maxHp)) * 1.35;
+  }
+
+  /** Darken a hex color toward black by factor f (0..1) — used for crisp cell outlines. */
+  private darken(hex: number, f: number): number {
+    const r = Math.round(((hex >> 16) & 0xff) * f);
+    const g = Math.round(((hex >> 8) & 0xff) * f);
+    const b = Math.round((hex & 0xff) * f);
+    return (r << 16) | (g << 8) | b;
   }
 
   private teamColor(team: number): number {

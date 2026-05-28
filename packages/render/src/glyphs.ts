@@ -43,25 +43,30 @@ export function powerStyle(name: string): PowerStyle {
   return STYLES[name] ?? { shape: "circle" };
 }
 
-/** Add a shape path centered at (x,y) sized by `r`. Caller fills/strokes. */
+/** Add a shape path centered at (x,y) sized by `r`. Bold, exaggerated silhouettes so the
+ *  archetype reads even at small cell sizes. Caller fills/strokes. */
 export function addShape(g: Graphics, shape: CellShape, x: number, y: number, r: number): void {
   switch (shape) {
     case "square": {
-      const a = r * 0.92;
-      g.roundRect(x - a, y - a, a * 2, a * 2, a * 0.35);
+      // Hard-cornered, slightly oversized block — unmistakably "tanky".
+      const a = r * 1.05;
+      g.rect(x - a, y - a, a * 2, a * 2);
       break;
     }
     case "diamond":
-      g.poly([x, y - r * 1.3, x + r * 1.1, y, x, y + r * 1.3, x - r * 1.1, y]);
+      // Tall, sharp kite.
+      g.poly([x, y - r * 1.55, x + r * 1.15, y, x, y + r * 1.55, x - r * 1.15, y]);
       break;
     case "triangle":
-      g.poly([x, y - r * 1.35, x + r * 1.2, y + r, x - r * 1.2, y + r]);
+      // Big upward wedge.
+      g.poly([x, y - r * 1.6, x + r * 1.45, y + r * 1.1, x - r * 1.45, y + r * 1.1]);
       break;
     case "hexagon": {
+      // Flat-top hex, oversized.
       const pts: number[] = [];
       for (let i = 0; i < 6; i++) {
-        const a = Math.PI / 6 + (i * Math.PI) / 3;
-        pts.push(x + Math.cos(a) * r * 1.12, y + Math.sin(a) * r * 1.12);
+        const a = (i * Math.PI) / 3;
+        pts.push(x + Math.cos(a) * r * 1.25, y + Math.sin(a) * r * 1.25);
       }
       g.poly(pts);
       break;

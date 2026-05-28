@@ -53,15 +53,30 @@ export function createWorld(cfg: BattleConfig): World {
     deathCount: 0, prevDeathCount: 0, leader: -1,
   };
   const perTeam = Math.round(cfg.totalCells / cfg.teamCount);
+  // Each team spawns as a blob at a RANDOM location (deterministic per seed), instead of the old
+  // fixed ring — gives layout variety and the occasional instant clash. Cluster centers are spread
+  // out a bit (rejection sampling against prior centers) so teams usually don't fully overlap.
+  const margin = 36;
+  const minSep = Math.min(W, H) * 0.32;
+  const centers: Array<{ x: number; y: number }> = [];
   for (let t = 0; t < cfg.teamCount; t++) {
-    const angle = (t / cfg.teamCount) * Math.PI * 2 - Math.PI / 2;
-    const r = Math.min(W, H) * 0.34;
-    const tcx = W / 2 + Math.cos(angle) * r;
-    const tcy = H / 2 + Math.sin(angle) * r;
+    let best = { x: 0, y: 0, d: -1 };
+    for (let attempt = 0; attempt < 12; attempt++) {
+      const cx = margin + w.prng() * (W - 2 * margin);
+      const cy = margin + w.prng() * (H - 2 * margin);
+      let nearest = Infinity;
+      for (const c of centers) {
+        const d = Math.hypot(cx - c.x, cy - c.y);
+        if (d < nearest) nearest = d;
+      }
+      if (centers.length === 0 || nearest >= minSep) { best = { x: cx, y: cy, d: nearest }; break; }
+      if (nearest > best.d) best = { x: cx, y: cy, d: nearest };
+    }
+    centers.push({ x: best.x, y: best.y });
     for (let i = 0; i < perTeam; i++) {
       const a = w.prng() * Math.PI * 2;
       const rr = Math.sqrt(w.prng()) * 26;
-      w.cells.push(makeCell(w, t, tcx + Math.cos(a) * rr, tcy + Math.sin(a) * rr));
+      w.cells.push(makeCell(w, t, best.x + Math.cos(a) * rr, best.y + Math.sin(a) * rr));
     }
   }
   return w;
