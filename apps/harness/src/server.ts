@@ -30,6 +30,17 @@ function arg(name: string): string | undefined {
   return i >= 0 ? process.argv[i + 1] : undefined;
 }
 
+// Resolve the tsx executable by absolute path (package-local, then workspace-hoisted .bin),
+// falling back to a bare "tsx" only if neither exists. Avoids PATH-dependent spawn failures.
+function resolveTsxBin(): string {
+  const ext = process.platform === "win32" ? ".cmd" : "";
+  const candidates = [
+    resolve(__dirname, "..", "node_modules", ".bin", "tsx" + ext),
+    resolve(__dirname, "..", "..", "..", "node_modules", ".bin", "tsx" + ext),
+  ];
+  return candidates.find((p) => existsSync(p)) ?? "tsx";
+}
+
 const DB_PATH = resolve(arg("db") ?? process.env.CELLSTORM_DB ?? "./data/cellstorm.db");
 const PORT = Number(arg("port") ?? process.env.PORT ?? 5174);
 const DIST_DIR = resolve(__dirname, "..", "dist");
@@ -262,7 +273,10 @@ function startSweepChild(job: {
 
   const childEntry = resolve(__dirname, "sweepChild.ts");
   // Spawn detached via tsx so the sweep survives independently of this request/connection.
-  const child = spawn("tsx", [childEntry, childJobPath], {
+  // Resolve the tsx binary by absolute path rather than relying on PATH — the bridge is often
+  // launched directly (node_modules/.bin/tsx, dev.mjs) without node_modules/.bin on PATH, in
+  // which case a bare "tsx" fails with ENOENT and the sweep silently never starts (0/0 done).
+  const child = spawn(resolveTsxBin(), [childEntry, childJobPath], {
     cwd: resolve(__dirname, ".."),
     detached: true,
     stdio: "ignore",
