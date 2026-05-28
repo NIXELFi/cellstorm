@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": { "rootDir": ".", "outDir": "./dist" },
+  "references": [
+    { "path": "../../packages/sim" },
+    { "path": "../../packages/score" },
+    { "path": "../cli" }
+  ],
+  "include": ["src", "test"]
+}

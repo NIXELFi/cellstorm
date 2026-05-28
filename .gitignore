@@ -4,3 +4,14 @@ dist/
 .DS_Store
 out/
 data/
+*.tsbuildinfo
+# tsc -b compiled output should never be committed from source trees
+# (emit now goes to dist/, but guard against stray standalone tsc runs)
+packages/**/src/**/*.js
+packages/**/src/**/*.d.ts
+packages/**/test/**/*.js
+packages/**/test/**/*.d.ts
+apps/**/src/**/*.js
+apps/**/src/**/*.d.ts
+apps/**/test/**/*.js
+apps/**/test/**/*.d.ts
