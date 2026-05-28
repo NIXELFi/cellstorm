@@ -15,7 +15,7 @@ export const DEFAULT_AI: AiParams = {
   flockWeight: 0.04,
   huntCenterBias: 0.04, // was 0 — small pull to arena center converges stragglers
   stalemateTicks: 60 * 12,
-  damageScale: 0.4, // was 1 — lower melee lethality stretches fights into the window
+  damageScale: 0.15, // tuned so video length centers ~25s (p25 ~15s, p75 ~40s); was 0.4 (~13s median)
 };
 
 export const DEFAULTS = {
