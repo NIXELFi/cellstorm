@@ -56,8 +56,8 @@ export class PostFx {
     this.bloom = new AdvancedBloomFilter({ threshold: 0.7, bloomScale: BLOOM_SCALE, brightness: 1, blur: 1.5, quality: 4 });
     this.rgb = new RGBSplitFilter({ red: { x: ABERRATION_BASE, y: 0 }, green: { x: 0, y: 0 }, blue: { x: -ABERRATION_BASE, y: 0 } });
     this.grade = new AdjustmentFilter({ saturation: 1.06, contrast: 1.04, brightness: 1, gamma: 1 });
-    // CRT filter used purely for a faint vignette (scanlines / noise / curvature all off).
-    this.vignette = new CRTFilter({ vignetting: 0.18, vignettingAlpha: 1, vignettingBlur: 0.3, lineWidth: 0, lineContrast: 0, noise: 0, curvature: 0 });
+    // CRT filter used purely for a barely-there vignette (scanlines / noise / curvature all off).
+    this.vignette = new CRTFilter({ vignetting: 0.06, vignettingAlpha: 1, vignettingBlur: 0.3, lineWidth: 0, lineContrast: 0, noise: 0, curvature: 0 });
 
     if (this.enabled) this.outer.filters = [this.bloom, this.rgb, this.grade, this.vignette];
   }
