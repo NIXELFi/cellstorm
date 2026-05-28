@@ -22,7 +22,7 @@ export const DEFAULTS = {
   totalCells: 900,
   arena: { width: 280, height: 498 },
   maxTicks: 60 * 75, // 75s @ 60fps hard cap
-  outroTicks: 48, // 0.8s victory beat after the last cell dies, so the wipe + win land on screen
+  outroTicks: 108, // 1.8s victory beat after the last cell dies, so the wipe + win land + linger
 } as const;
 
 export type BattleConfigInput =
