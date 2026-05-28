@@ -98,30 +98,37 @@ export function renderScore(score: AudioScore, sampleRate: number): StereoPcm {
     }
   }
 
-  // Master chain: (1) a gentle one-pole high-cut (~6kHz) to soften any edge, then (2) a brick-wall
-  // peak LIMITER that GUARANTEES the output never exceeds `ceiling` (< full scale) — instant attack
-  // (so a peak can never slip through and clip) with a smooth release (so the level recovers without
-  // pumping). The same gain is applied to both channels to keep the stereo image stable.
+  // Master chain. (1) Band-limit: a one-pole HIGH-pass (~45Hz) removes inaudible sub-bass — that
+  // rumble is mostly felt as limiter pumping, not heard, and a stack of deep explosion booms driving
+  // a brick-wall limiter is what produced the "clipping" crackle — then a gentle high-cut (~6kHz)
+  // softens the top. (2) A brick-wall peak LIMITER that GUARANTEES the output never exceeds `ceiling`
+  // (< full scale): instant attack (a peak can never slip through and clip) with a SLOW release so it
+  // rides the level smoothly instead of distorting low-frequency cycles. Same gain on both channels.
   const dt = 1 / sampleRate;
-  const rc = 1 / (twoPi * 6000);
-  const hp = dt / (rc + dt);
-  let yl = 0, yr = 0;
+  const lpA = dt / (1 / (twoPi * 6000) + dt);
+  const rcHp = 1 / (twoPi * 45);
+  const hpA = rcHp / (rcHp + dt);
+  let lpL = 0, lpR = 0, hpL = 0, hpR = 0, prevL = 0, prevR = 0;
   for (let i = 0; i < total; i++) {
-    yl += hp * (left[i]! - yl);
-    yr += hp * (right[i]! - yr);
-    left[i] = yl;
-    right[i] = yr;
+    const xl = left[i]!, xr = right[i]!;
+    hpL = hpA * (hpL + xl - prevL); // high-pass
+    hpR = hpA * (hpR + xr - prevR);
+    prevL = xl; prevR = xr;
+    lpL += lpA * (hpL - lpL); // then low-pass (band-limited)
+    lpR += lpA * (hpR - lpR);
+    left[i] = lpL;
+    right[i] = lpR;
   }
 
   // Conservative ceiling: well below full scale so even the lossy AAC encoder's overshoot can't
   // reach 0 dBFS (no hard clipping, ever).
   const ceiling = 0.8;
-  const releaseCoef = Math.exp(-1 / (sampleRate * 0.08)); // ~80ms release
+  const releaseCoef = Math.exp(-1 / (sampleRate * 0.25)); // ~250ms release — smooth, no bass pumping
   let gain = 1;
   for (let i = 0; i < total; i++) {
     const peak = Math.max(Math.abs(left[i]!), Math.abs(right[i]!));
     const need = peak > ceiling ? ceiling / peak : 1; // gain that would tame THIS sample
-    // Instant attack: clamp down immediately so |out| <= ceiling this very sample. Smooth release up.
+    // Instant attack: clamp down immediately so |out| <= ceiling this very sample. Slow release up.
     gain = need < gain ? need : need + (gain - need) * releaseCoef;
     left[i] = left[i]! * gain;
     right[i] = right[i]! * gain;

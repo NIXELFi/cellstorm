@@ -77,6 +77,20 @@ describe("eventNotes — other events (all from the fixed harmony)", () => {
     expect(boom!.freqEnd!).toBeLessThan(boom!.freq);
   });
 
+  test("coalesces simultaneous explosions so a cluster detonation isn't a giant stacked transient", () => {
+    const c = cfg(["Bomb", "Magnet"]);
+    const key = makeKey(c.seed);
+    const voices = makeVoices(c.seed, c.powers);
+    const boomOf = (notes: ReturnType<typeof eventNotes>) => notes.filter((n) => n.env === "pluck" && n.freq < key.rootFreq);
+    const one = boomOf(eventNotes(log(c, [{ type: "explosion", tick: 60, x: 140, y: 0, team: 0 }], 300, 300, 0), key, voices, FPS));
+    const manyEvents: SimEvent[] = Array.from({ length: 9 }, (_, i) => ({ type: "explosion", tick: 60, x: 140, y: 0, team: 0 } as SimEvent));
+    const many = boomOf(eventNotes(log(c, manyEvents, 300, 300, 0), key, voices, FPS));
+    expect(many).toHaveLength(9);
+    expect(many[0]!.gain).toBeLessThan(one[0]!.gain); // each quieter when many coincide
+    // total energy grows sublinearly, nowhere near 9x a single boom
+    expect(many.reduce((s, n) => s + n.gain, 0)).toBeLessThan(one[0]!.gain * 4);
+  });
+
   test("projectileFire makes a short, quiet, soft blip", () => {
     const c = cfg(["Sniper", "Tank"]);
     const key = makeKey(c.seed);

@@ -20,6 +20,11 @@ const sec = (tick: number, fps: number): number => tick / fps;
 export function eventNotes(log: BattleLog, key: Key, voices: Voice[], fps: number): Note[] {
   const notes: Note[] = [];
 
+  // Count explosions per tick so a cluster detonation (Bomb cells pulled together by a Magnet, etc.)
+  // doesn't stack N full-gain sub-bass booms into one huge transient that crackles the limiter.
+  const explosionsAtTick = new Map<number, number>();
+  for (const e of log.events) if (e.type === "explosion") explosionsAtTick.set(e.tick, (explosionsAtTick.get(e.tick) ?? 0) + 1);
+
   for (const e of log.events) {
     switch (e.type) {
       case "death": {
@@ -30,9 +35,13 @@ export function eventNotes(log: BattleLog, key: Key, voices: Voice[], fps: numbe
         break;
       }
       case "explosion": {
-        const freq = semitoneFreq(key, 0, -2); // low boom two octaves below the root
-        notes.push({ t: sec(e.tick, fps), dur: 0.8, freq, freqEnd: freq * 0.7, timbre: "sine", env: "pluck", gain: 0.34, pan: panFromX(e.x) });
-        notes.push({ t: sec(e.tick, fps), dur: 0.08, freq: freq * 8, timbre: "noise", env: "blip", gain: 0.1, pan: panFromX(e.x) });
+        // One octave below the root (a punchy thump, not deep sub-bass that the limiter chokes on).
+        const freq = semitoneFreq(key, 0, -1);
+        // Coalesce simultaneous booms: scale by 1/sqrt(count) so a cluster grows sublinearly.
+        const count = explosionsAtTick.get(e.tick) ?? 1;
+        const scale = 1 / Math.sqrt(count);
+        notes.push({ t: sec(e.tick, fps), dur: 0.55, freq, freqEnd: freq * 0.7, timbre: "sine", env: "pluck", gain: 0.3 * scale, pan: panFromX(e.x) });
+        notes.push({ t: sec(e.tick, fps), dur: 0.07, freq: freq * 6, timbre: "noise", env: "blip", gain: 0.08 * scale, pan: panFromX(e.x) });
         break;
       }
       case "projectileFire": {

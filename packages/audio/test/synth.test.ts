@@ -87,6 +87,13 @@ describe("renderScore", () => {
     }
   });
 
+  test("attenuates inaudible sub-bass (so stacked low booms can't drive the limiter into crackle)", () => {
+    const opts = { duration: 1, notes: [note({ timbre: "sine" as const, env: "pad" as const, dur: 0.8, gain: 0.8 })] };
+    const sub = renderScore({ ...opts, notes: [{ ...opts.notes[0]!, freq: 30 }] }, SR).left;
+    const mid = renderScore({ ...opts, notes: [{ ...opts.notes[0]!, freq: 300 }] }, SR).left;
+    expect(energy(sub)).toBeLessThan(energy(mid) * 0.5); // sub-bass largely removed
+  });
+
   test("boop is a distinct timbre, not the plain sine fallback", () => {
     const opts = { duration: 1, notes: [note({ timbre: "sine" as const, gain: 0.6, env: "pad" as const, dur: 0.5 })] };
     const sine = renderScore(opts, SR).left;
