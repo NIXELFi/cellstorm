@@ -55,11 +55,15 @@ window.__cellstorm = {
 
     // The sim arena is 280 wide. resolutionScale maps arena units -> canvas pixels.
     const resolutionScale = args.width / args.config.arena.width;
+    const hudRoot = document.getElementById("hud") as HTMLElement;
     player = new BattlePlayer(app, {
       config: args.config,
       hud: args.hud,
       resolutionScale,
+      hudRoot,
     });
+    // Wait for the HUD display fonts so the very first captured frame isn't unstyled.
+    if (document.fonts && document.fonts.ready) await document.fonts.ready;
     // Render the first (tick 0) frame so the very first capture is the initial state.
     app.render();
   },

@@ -9,15 +9,11 @@ export type { PlayerOptions } from "./player";
 export { PixiScene } from "./scene";
 export type { SceneOptions } from "./scene";
 
-// HUD.
-export { Hud } from "./hud/compositor";
-export type { HudOptions } from "./hud/compositor";
+// HUD — CSS broadcast overlay (replaces the old Pixi HUD; team color + shapes live in the scene).
+export { CssHud } from "./cssHud";
 export { DEFAULT_HUD } from "./hud/types";
 export type { HudConfig } from "./hud/types";
-export { Counters } from "./hud/counters";
-export { Leaderboard } from "./hud/leaderboard";
-export { Intro } from "./hud/intro";
-export { Winner } from "./hud/winner";
+export { powerDesc, POWER_DESC } from "./descs";
 
 // HUD pure logic (shared with the harness HUD editor / sparkline).
 export {

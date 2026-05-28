@@ -31,6 +31,7 @@ export class PlayerPanel {
   private rafId?: number;
   private scrub!: HTMLInputElement;
   private frameLabel!: HTMLElement;
+  private hudOverlay?: HTMLElement; // DOM layer over the canvas for the CSS broadcast HUD
   private endFrame = -1; // total playback length (frames) once the battle has ended
   private renderCmd!: HTMLElement;
   private onPlayerReady?: (h: PlayerPanelHandle) => void;
@@ -78,18 +79,26 @@ export class PlayerPanel {
     if (!this.config) return;
     this.teardownPlayer();
 
+    const w = Math.round(this.config.arena.width * PREVIEW_SCALE);
+    const h = Math.round(this.config.arena.height * PREVIEW_SCALE);
     if (!this.app) {
       const app = new Application();
-      const w = Math.round(this.config.arena.width * PREVIEW_SCALE);
-      const h = Math.round(this.config.arena.height * PREVIEW_SCALE);
       await app.init({ width: w, height: h, background: 0x050008, antialias: true });
       this.app = app;
+      // Wrap canvas + an absolutely-positioned overlay so the CSS HUD composites on top.
       this.mount.innerHTML = "";
-      this.mount.appendChild(app.canvas as HTMLCanvasElement);
+      const wrap = document.createElement("div");
+      wrap.className = "stage-wrap";
+      wrap.style.cssText = `position:relative;width:${w}px;height:${h}px;`;
+      const overlay = document.createElement("div");
+      overlay.style.cssText = "position:absolute;inset:0;";
+      wrap.append(app.canvas as HTMLCanvasElement, overlay);
+      this.mount.appendChild(wrap);
+      this.hudOverlay = overlay;
     } else {
-      const w = Math.round(this.config.arena.width * PREVIEW_SCALE);
-      const h = Math.round(this.config.arena.height * PREVIEW_SCALE);
       this.app.renderer.resize(w, h);
+      const wrap = this.hudOverlay?.parentElement;
+      if (wrap) wrap.style.cssText = `position:relative;width:${w}px;height:${h}px;`;
     }
 
     this.endFrame = -1; // reset playback-length tracking for the new battle
@@ -98,6 +107,7 @@ export class PlayerPanel {
       hud: this.hud,
       resolutionScale: PREVIEW_SCALE,
       theme: this.theme,
+      hudRoot: this.hudOverlay,
     });
     this.renderControls();
     this.startLoop();

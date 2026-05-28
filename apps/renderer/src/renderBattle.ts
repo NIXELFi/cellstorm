@@ -59,8 +59,10 @@ export async function bundlePageScript(): Promise<string> {
 
 const PAGE_HTML = `<!doctype html><html><head><meta charset="utf-8"><style>
   html,body{margin:0;padding:0;background:#000;overflow:hidden}
+  #wrap{position:relative;display:inline-block;line-height:0}
   canvas{display:block}
-</style></head><body><canvas id="stage"></canvas></body></html>`;
+  #hud{position:absolute;inset:0}
+</style></head><body><div id="wrap"><canvas id="stage"></canvas><div id="hud"></div></div></body></html>`;
 
 export async function renderBattle(opts: RenderOptions): Promise<RenderResult> {
   const width = opts.width ?? MASTER_WIDTH;
@@ -92,18 +94,20 @@ export async function renderBattle(opts: RenderOptions): Promise<RenderResult> {
       { config: opts.config, hud: opts.hud, width, height },
     );
 
-    const canvas = page.locator("#stage");
+    // Capture the full viewport (canvas + CSS HUD overlay), not just the canvas, so the
+    // broadcast HUD is baked into the frames.
+    const shot = () => page.screenshot({ path: join(opts.framesDir, frameFileName(frameCount)) });
 
     // Capture tick 0 (initial state) first, then step.
     while (frameCount < maxFrames) {
-      await canvas.screenshot({ path: join(opts.framesDir, frameFileName(frameCount)) });
+      await shot();
       frameCount++;
       if (opts.onProgress && frameCount % progressEvery === 0) opts.onProgress(frameCount);
 
       ended = await page.evaluate(() => window.__cellstorm.stepFrame());
       if (ended) {
         // Capture the final post-end frame (winner overlay settles).
-        await canvas.screenshot({ path: join(opts.framesDir, frameFileName(frameCount)) });
+        await shot();
         frameCount++;
         break;
       }

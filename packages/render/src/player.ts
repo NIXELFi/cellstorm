@@ -12,7 +12,7 @@ import { Application } from "pixi.js";
 import { makePrng, EventSink, type BattleConfig } from "@cellstorm/sim";
 import { PixiScene } from "./scene";
 import { powerStyle } from "./glyphs";
-import { Hud } from "./hud/compositor";
+import { CssHud } from "./cssHud";
 import { type HudConfig, DEFAULT_HUD } from "./hud/types";
 import { THEME, type Theme } from "./theme";
 import { ParticleField } from "./fx";
@@ -27,6 +27,8 @@ export interface PlayerOptions {
   /** Target resolution multiplier: 1 for preview (280x498), ~7.7 for 4K (2160x3840). */
   resolutionScale: number;
   theme?: Theme;
+  /** DOM element overlaying the canvas; the CSS broadcast HUD renders here. */
+  hudRoot?: HTMLElement;
 }
 
 export class BattlePlayer {
@@ -35,7 +37,7 @@ export class BattlePlayer {
   private readonly scale: number;
   private readonly theme: Theme;
   private readonly scene: PixiScene;
-  private readonly hud: Hud;
+  private readonly hud?: CssHud;
   private cosmetic: ParticleField;
   private state: SimState;
   private sink: EventSink;
@@ -56,11 +58,9 @@ export class BattlePlayer {
 
     this.cosmetic = new ParticleField(this.cosmeticPrng());
     this.scene = new PixiScene(app, { arena: this.config.arena, scale: this.scale, theme: this.theme });
-    this.hud = new Hud(app, opts.hud ?? DEFAULT_HUD, this.config.powers, {
-      arena: this.config.arena,
-      scale: this.scale,
-      theme: this.theme,
-    });
+    if (opts.hudRoot) {
+      this.hud = new CssHud(opts.hudRoot, opts.hud ?? DEFAULT_HUD, this.config.powers, this.theme);
+    }
 
     this.render();
   }
@@ -87,7 +87,6 @@ export class BattlePlayer {
     this.sink = fresh.sink;
     this.drainedEvents = this.sink.events.length; // skip replaying historical FX bursts
     this.cosmetic = new ParticleField(this.cosmeticPrng());
-    this.hud.reset();
     this.render();
   }
 
@@ -125,16 +124,16 @@ export class BattlePlayer {
   }
 
   hudConfig(): HudConfig {
-    return this.hud.getConfig();
+    return this.hud?.getConfig() ?? DEFAULT_HUD;
   }
   setHudConfig(config: Partial<HudConfig>): void {
-    this.hud.setConfig(config);
+    this.hud?.setConfig(config);
     this.render();
   }
 
   destroy(): void {
     this.scene.destroy();
-    this.hud.destroy();
+    this.hud?.destroy();
     this.cosmetic.clear();
   }
 
@@ -169,6 +168,6 @@ export class BattlePlayer {
 
   private render(): void {
     this.scene.draw(this.state.world, this.cosmetic);
-    this.hud.update(countsOf(this.state.world), this.state.world.frame, this.state.world.winner);
+    this.hud?.update(countsOf(this.state.world), this.state.world.frame, this.state.world.winner);
   }
 }
