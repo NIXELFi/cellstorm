@@ -39,6 +39,9 @@ importers:
 
   apps/harness:
     dependencies:
+      '@cellstorm/audio':
+        specifier: workspace:*
+        version: link:../../packages/audio
       '@cellstorm/cli':
         specifier: workspace:*
         version: link:../cli
@@ -80,6 +83,9 @@ importers:
 
   apps/renderer:
     dependencies:
+      '@cellstorm/audio':
+        specifier: workspace:*
+        version: link:../../packages/audio
       '@cellstorm/cli':
         specifier: workspace:*
         version: link:../cli
@@ -102,6 +108,12 @@ importers:
       tsx:
         specifier: ^4.19.0
         version: 4.22.3
+
+  packages/audio:
+    dependencies:
+      '@cellstorm/sim':
+        specifier: workspace:*
+        version: link:../sim
 
   packages/render:
     dependencies:

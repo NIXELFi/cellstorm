@@ -6,10 +6,11 @@
 // via Playwright, encodes them to a 60fps MP4 with ffmpeg, and cleans up the temp frames dir.
 
 import { parseArgs } from "node:util";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { normalizeConfig, type BattleConfig } from "@cellstorm/sim";
+import { normalizeConfig, runBattle, type BattleConfig } from "@cellstorm/sim";
+import { renderBattleAudioWav } from "@cellstorm/audio";
 // Import the HUD config from the pure (no-Pixi) subpath export rather than the @cellstorm/render
 // package index, whose BattlePlayer re-export pulls in pixi.js (which touches `navigator` at load
 // and throws under Node-side CLI use).
@@ -27,6 +28,7 @@ export interface RenderCliArgs {
   maxframes?: string;
   fps?: string;
   keep?: boolean;
+  mute?: boolean;
 }
 
 export function parseRenderArgs(argv: string[]): RenderCliArgs {
@@ -41,6 +43,7 @@ export function parseRenderArgs(argv: string[]): RenderCliArgs {
       maxframes: { type: "string" },
       fps: { type: "string" },
       keep: { type: "boolean" },
+      mute: { type: "boolean" },
     },
   });
   return values as RenderCliArgs;
@@ -105,8 +108,19 @@ async function main(argv: string[]): Promise<void> {
     process.stdout.write(
       `Captured ${result.frameCount} frames (${result.width}x${result.height}, ended=${result.ended}). Encoding...\n`,
     );
-    await encode({ framesDir, outPath: args.out, fps });
-    process.stdout.write(`Done: ${args.out}\n`);
+
+    // Generate the soundtrack from the deterministic event log (re-sim is cheap next to Playwright;
+    // the determinism contract guarantees it matches the frames the browser produced). Skip on --mute.
+    let audioPath: string | undefined;
+    if (!args.mute) {
+      const { log } = runBattle(config);
+      audioPath = join(framesDir, "audio.wav");
+      writeFileSync(audioPath, renderBattleAudioWav(log, fps));
+      process.stdout.write(`  audio: ${log.events.length} events scored -> ${audioPath}\n`);
+    }
+
+    await encode({ framesDir, outPath: args.out, fps, audioPath });
+    process.stdout.write(`Done: ${args.out}${audioPath ? " (with sound)" : " (muted)"}\n`);
   } finally {
     if (!args.keep) rmSync(framesDir, { recursive: true, force: true });
     else process.stdout.write(`Kept frames in ${framesDir}\n`);

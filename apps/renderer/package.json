@@ -10,6 +10,7 @@
     "render": "tsx src/cli.ts"
   },
   "dependencies": {
+    "@cellstorm/audio": "workspace:*",
     "@cellstorm/cli": "workspace:*",
     "@cellstorm/render": "workspace:*",
     "@cellstorm/sim": "workspace:*",

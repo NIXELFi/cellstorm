@@ -10,6 +10,8 @@ import type { BattleConfig } from "@cellstorm/sim";
 import { configIdOf } from "@cellstorm/cli/config-id";
 import { fetchLog, startRender, fetchRenderProgress } from "../api";
 import { climaxTick } from "./logLogic";
+import { PreviewAudio } from "./previewAudio";
+import { audioShouldPlay } from "./previewAudioLogic";
 
 const PREVIEW_SCALE = 1.5; // 280x498 logical -> 420x747 canvas (crisp but light)
 
@@ -34,6 +36,9 @@ export class PlayerPanel {
   private endFrame = -1; // total playback length (frames) once the battle has ended
   private renderCmd!: HTMLElement;
   private onPlayerReady?: (h: PlayerPanelHandle) => void;
+  private readonly audio = new PreviewAudio();
+  private soundOn = false;
+  private speed = 1;
 
   constructor() {
     this.el = document.createElement("div");
@@ -127,7 +132,10 @@ export class PlayerPanel {
 
   private syncScrub(): void {
     if (!this.player || !this.config) return;
-    if (this.player.ended && this.endFrame < 0) this.endFrame = this.player.frame;
+    if (this.player.ended && this.endFrame < 0) {
+      this.endFrame = this.player.frame;
+      this.audio.stop(); // soundtrack ends with the battle
+    }
     const total = this.endFrame > 0 ? this.endFrame : this.config.maxTicks;
     this.scrub.max = String(total);
     this.scrub.value = String(this.player.frame);
@@ -146,9 +154,11 @@ export class PlayerPanel {
       if (this.player.isPlaying) {
         this.player.pause();
         playPause.textContent = "Play";
+        this.audio.stop();
       } else {
         this.player.play();
         playPause.textContent = "Pause";
+        this.syncAudio();
       }
     };
 
@@ -171,6 +181,18 @@ export class PlayerPanel {
     sendRender.title = "Render this battle to an MP4 (opens in Finder + player when done)";
     sendRender.onclick = () => void this.sendToRender();
 
+    const soundBtn = document.createElement("button");
+    soundBtn.className = "btn";
+    const soundLabel = () => (soundBtn.textContent = this.soundOn ? "🔊 Sound: on" : "🔇 Sound: off");
+    soundBtn.title = "Play the generated soundtrack during 1x playback (what the rendered MP4 will carry)";
+    soundLabel();
+    soundBtn.onclick = () => {
+      this.soundOn = !this.soundOn;
+      soundLabel();
+      if (this.soundOn) this.syncAudio();
+      else this.audio.stop();
+    };
+
     const speedSel = document.createElement("select");
     for (const s of [0.25, 0.5, 1, 2, 4]) {
       const opt = document.createElement("option");
@@ -179,7 +201,12 @@ export class PlayerPanel {
       if (s === 1) opt.selected = true;
       speedSel.appendChild(opt);
     }
-    speedSel.onchange = () => this.player?.setSpeed(Number(speedSel.value));
+    speedSel.onchange = () => {
+      this.speed = Number(speedSel.value);
+      this.player?.setSpeed(this.speed);
+      // Soundtrack only stays in sync at 1x; restart or stop accordingly.
+      if (this.soundOn && this.player?.isPlaying) this.syncAudio();
+    };
 
     this.scrub = document.createElement("input");
     this.scrub.type = "range";
@@ -190,6 +217,7 @@ export class PlayerPanel {
     this.scrub.oninput = () => {
       this.player?.pause();
       playPause.textContent = "Play";
+      this.audio.stop(); // scrubbing breaks sync; sound resumes on the next Play
       this.player?.seekTo(Number(this.scrub.value));
       this.frameLabel.textContent = `${this.scrub.value}t`;
     };
@@ -200,7 +228,7 @@ export class PlayerPanel {
 
     const row1 = document.createElement("div");
     row1.className = "inline";
-    row1.append(playPause, stepBtn, climax, sendRender, speedSel, this.frameLabel);
+    row1.append(playPause, stepBtn, climax, sendRender, soundBtn, speedSel, this.frameLabel);
     const row2 = document.createElement("div");
     row2.className = "inline scrub-row";
     row2.appendChild(this.scrub);
@@ -248,6 +276,19 @@ export class PlayerPanel {
     }, 700);
   }
 
+  /** Start the soundtrack from the current frame when conditions allow; otherwise ensure silence. */
+  private syncAudio(): void {
+    if (!this.player || !this.config) return;
+    const ok = audioShouldPlay({
+      enabled: this.soundOn,
+      playing: this.player.isPlaying,
+      speed: this.speed,
+      ended: this.player.ended,
+    });
+    if (ok) this.audio.start(this.config, this.player.frame);
+    else this.audio.stop();
+  }
+
   private async jumpToClimax(): Promise<void> {
     if (!this.player || !this.config) return;
     try {
@@ -265,6 +306,7 @@ export class PlayerPanel {
   private teardownPlayer(): void {
     if (this.rafId) cancelAnimationFrame(this.rafId);
     this.rafId = undefined;
+    this.audio.invalidate(); // config is about to change; drop the cached soundtrack
     this.player?.destroy();
     this.player = undefined;
   }

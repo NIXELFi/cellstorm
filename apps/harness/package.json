@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@cellstorm/sim": "workspace:*",
+    "@cellstorm/audio": "workspace:*",
     "@cellstorm/score": "workspace:*",
     "@cellstorm/cli": "workspace:*",
     "@cellstorm/render": "workspace:*",

@@ -9,6 +9,7 @@
   },
   "references": [
     { "path": "../../packages/sim" },
+    { "path": "../../packages/audio" },
     { "path": "../../packages/score" },
     { "path": "../../packages/render" },
     { "path": "../cli" }
