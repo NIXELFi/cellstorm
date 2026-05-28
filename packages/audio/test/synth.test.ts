@@ -36,12 +36,16 @@ describe("renderScore", () => {
     expect(energy(right)).toBe(0);
   });
 
-  test("output stays within [-1, 1] even when many loud notes stack", () => {
+  test("NEVER hard clips: a dense mix of hundreds of max-gain notes stays under the ceiling", () => {
+    // Simulate the "many teams, lots of events" case that was clipping.
     const notes: Note[] = [];
-    for (let i = 0; i < 50; i++) notes.push(note({ t: 0.1, gain: 1, freq: 200 + i }));
+    for (let i = 0; i < 600; i++) {
+      notes.push(note({ t: (i % 100) * 0.005, dur: 0.5, gain: 1, freq: 120 + (i % 40) * 13, pan: (i % 3) - 1 }));
+    }
     const { left, right } = renderScore({ duration: 1, notes }, SR);
-    for (const x of left) expect(Math.abs(x)).toBeLessThanOrEqual(1);
-    for (const x of right) expect(Math.abs(x)).toBeLessThanOrEqual(1);
+    const peak = Math.max(...Array.from(left).map(Math.abs), ...Array.from(right).map(Math.abs));
+    expect(peak).toBeLessThan(0.95); // a real ceiling below full-scale — no slamming to ±1
+    expect(peak).toBeGreaterThan(0); // and it actually produced sound
   });
 
   test("a centered note has equal energy in both channels", () => {
@@ -61,8 +65,8 @@ describe("renderScore", () => {
     expect(energy(beforeStart)).toBe(0);
   });
 
-  test("renders every timbre and envelope without producing NaN", () => {
-    const timbres = ["sine", "triangle", "square", "saw", "pulse", "bell", "noise"] as const;
+  test("renders every (soft) timbre and envelope without producing NaN", () => {
+    const timbres = ["sine", "triangle", "boop", "bell", "noise"] as const;
     const envs = ["pluck", "pad", "blip"] as const;
     const notes: Note[] = [];
     let t = 0;
@@ -74,5 +78,21 @@ describe("renderScore", () => {
     const { left, right } = renderScore({ duration: t + 1, notes }, SR);
     for (const x of left) expect(Number.isFinite(x)).toBe(true);
     for (const x of right) expect(Number.isFinite(x)).toBe(true);
+  });
+
+  test("the soft melodic timbres produce audible energy", () => {
+    for (const timbre of ["boop", "sine", "triangle", "bell"] as const) {
+      const { left } = renderScore({ duration: 1, notes: [note({ timbre, gain: 0.8 })] }, SR);
+      expect(energy(left)).toBeGreaterThan(0);
+    }
+  });
+
+  test("boop is a distinct timbre, not the plain sine fallback", () => {
+    const opts = { duration: 1, notes: [note({ timbre: "sine" as const, gain: 0.6, env: "pad" as const, dur: 0.5 })] };
+    const sine = renderScore(opts, SR).left;
+    const boop = renderScore({ ...opts, notes: [{ ...opts.notes[0]!, timbre: "boop" as const }] }, SR).left;
+    let diff = 0;
+    for (let i = 0; i < sine.length; i++) diff += Math.abs(sine[i]! - boop[i]!);
+    expect(diff).toBeGreaterThan(1); // a faint harmonic makes it differ from a pure sine
   });
 });

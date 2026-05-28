@@ -1,46 +1,34 @@
 // Pure synthesis: an AudioScore -> stereo Float32 PCM. No Math.random, no wall clock — same input,
-// same samples. Each note is an oscillator (a small harmonic series for the richer timbres, so they
-// stay alias-light) shaped by an analytic envelope, gained, and equal-power panned into the mix.
-// The master is soft-clipped with tanh so a hot stack of notes saturates musically instead of
-// clipping into [-1, 1] hard edges.
+// same samples. Each note is an oscillator shaped by an analytic envelope, gained, and equal-power
+// panned into the mix. Everything is deliberately SOFT: timbres are short, gently-rolled-off
+// harmonic sums (no raw square/saw/pulse), the master is lightly driven (not slammed), and a gentle
+// one-pole high-cut takes the edge off — so a busy mix stays warm instead of harsh.
 
 import type { AudioScore, EnvShape, Note, Timbre } from "./types";
 
-// Deterministic value noise for the "noise" timbre — a hashed pseudo-random keyed by sample index,
-// so it's reproducible (no Math.random).
+// Deterministic value noise for the "noise" timbre — hashed by sample index (no Math.random).
 function hashNoise(i: number): number {
   let x = (i * 0x9e3779b1) >>> 0;
   x ^= x >>> 15;
   x = Math.imul(x, 0x85ebca77);
   x ^= x >>> 13;
-  return (x >>> 0) / 0xffffffff * 2 - 1;
+  return ((x >>> 0) / 0xffffffff) * 2 - 1;
 }
 
-/** One oscillator sample at phase (radians) for a timbre. Harmonic sums kept short for speed. */
+/** One oscillator sample at phase (radians). Soft, sine-based — a clean "boop" palette. */
 function osc(timbre: Timbre, phase: number, sampleIndex: number): number {
   switch (timbre) {
     case "sine":
       return Math.sin(phase);
     case "triangle":
-      // odd harmonics, 1/n^2, alternating sign -> triangle-ish
-      return (
-        Math.sin(phase) -
-        Math.sin(3 * phase) / 9 +
-        Math.sin(5 * phase) / 25 -
-        Math.sin(7 * phase) / 49
-      ) * (8 / (Math.PI * Math.PI));
-    case "square":
-      return (Math.sin(phase) + Math.sin(3 * phase) / 3 + Math.sin(5 * phase) / 5 + Math.sin(7 * phase) / 7) * (4 / Math.PI);
-    case "saw":
-      return (
-        Math.sin(phase) - Math.sin(2 * phase) / 2 + Math.sin(3 * phase) / 3 - Math.sin(4 * phase) / 4 + Math.sin(5 * phase) / 5
-      ) * (2 / Math.PI);
-    case "pulse":
-      // narrow pulse ~ sum of cosines; bright and reedy
-      return (Math.sin(phase) + Math.sin(2 * phase) / 2 + Math.sin(3 * phase) / 3) * 0.7;
+      // odd harmonics, 1/n^2 — soft, mostly fundamental
+      return (Math.sin(phase) - Math.sin(3 * phase) / 9 + Math.sin(5 * phase) / 25) * (8 / (Math.PI * Math.PI));
+    case "boop":
+      // mostly sine with a faint 2nd harmonic — a rounded, modernized 8-bit doot/boop
+      return (Math.sin(phase) + 0.16 * Math.sin(2 * phase)) / 1.16;
     case "bell":
-      // inharmonic partials -> metallic/bell
-      return (Math.sin(phase) + Math.sin(2.76 * phase) * 0.5 + Math.sin(5.4 * phase) * 0.25) * 0.6;
+      // soft inharmonic partials, gently scaled down (used sparingly)
+      return (Math.sin(phase) + 0.3 * Math.sin(2.76 * phase) + 0.12 * Math.sin(5.4 * phase)) / 1.42;
     case "noise":
       return hashNoise(sampleIndex);
     default:
@@ -53,26 +41,25 @@ function envelope(env: EnvShape, p: number): number {
   if (p < 0 || p > 1) return 0;
   switch (env) {
     case "pluck": {
-      // ~3ms attack ramp then exponential decay across the note
-      const attack = 0.02;
+      // soft ~8ms attack then a gentle exponential decay (rings longer than v1 -> less staccato)
+      const attack = 0.03;
       const a = p < attack ? p / attack : 1;
-      return a * Math.exp(-4.5 * p);
+      return a * Math.exp(-3 * p);
     }
     case "pad": {
-      // slow attack, gentle plateau, slow release (raised-cosine-ish)
-      const atk = 0.25, rel = 0.4;
+      // slow raised-cosine attack, plateau, slow release
+      const atk = 0.3, rel = 0.45;
       if (p < atk) return 0.5 - 0.5 * Math.cos((p / atk) * Math.PI);
       if (p > 1 - rel) return 0.5 - 0.5 * Math.cos(((1 - p) / rel) * Math.PI);
       return 1;
     }
     case "blip": {
-      // tiny attack, fast decay
-      const attack = 0.05;
+      const attack = 0.06;
       const a = p < attack ? p / attack : 1;
-      return a * Math.exp(-9 * p);
+      return a * Math.exp(-7 * p);
     }
     default:
-      return Math.exp(-4 * p);
+      return Math.exp(-3 * p);
   }
 }
 
@@ -93,8 +80,7 @@ export function renderScore(score: AudioScore, sampleRate: number): StereoPcm {
     const end = Math.min(total, start + len);
     if (start >= total || end <= 0) continue;
 
-    // Equal-power pan: pan -1 -> full left, +1 -> full right.
-    const angle = ((n.pan + 1) / 2) * (Math.PI / 2);
+    const angle = ((n.pan + 1) / 2) * (Math.PI / 2); // equal-power pan
     const gl = Math.cos(angle) * n.gain;
     const gr = Math.sin(angle) * n.gain;
 
@@ -103,8 +89,7 @@ export function renderScore(score: AudioScore, sampleRate: number): StereoPcm {
     let phase = 0;
     for (let i = Math.max(0, start); i < end; i++) {
       const local = i - start;
-      const p = local / len; // 0..1 across the note
-      // linear frequency glide
+      const p = local / len;
       const freq = f0 + (f1 - f0) * p;
       phase += (twoPi * freq) / sampleRate;
       const s = osc(n.timbre, phase, i) * envelope(n.env, p);
@@ -113,11 +98,33 @@ export function renderScore(score: AudioScore, sampleRate: number): StereoPcm {
     }
   }
 
-  // Master soft-clip: tanh saturates a hot mix into [-1,1] musically (with headroom trim first).
-  const drive = 0.8;
+  // Master chain: (1) a gentle one-pole high-cut (~6kHz) to soften any edge, then (2) a brick-wall
+  // peak LIMITER that GUARANTEES the output never exceeds `ceiling` (< full scale) — instant attack
+  // (so a peak can never slip through and clip) with a smooth release (so the level recovers without
+  // pumping). The same gain is applied to both channels to keep the stereo image stable.
+  const dt = 1 / sampleRate;
+  const rc = 1 / (twoPi * 6000);
+  const hp = dt / (rc + dt);
+  let yl = 0, yr = 0;
   for (let i = 0; i < total; i++) {
-    left[i] = Math.tanh(left[i]! * drive);
-    right[i] = Math.tanh(right[i]! * drive);
+    yl += hp * (left[i]! - yl);
+    yr += hp * (right[i]! - yr);
+    left[i] = yl;
+    right[i] = yr;
+  }
+
+  // Conservative ceiling: well below full scale so even the lossy AAC encoder's overshoot can't
+  // reach 0 dBFS (no hard clipping, ever).
+  const ceiling = 0.8;
+  const releaseCoef = Math.exp(-1 / (sampleRate * 0.08)); // ~80ms release
+  let gain = 1;
+  for (let i = 0; i < total; i++) {
+    const peak = Math.max(Math.abs(left[i]!), Math.abs(right[i]!));
+    const need = peak > ceiling ? ceiling / peak : 1; // gain that would tame THIS sample
+    // Instant attack: clamp down immediately so |out| <= ceiling this very sample. Smooth release up.
+    gain = need < gain ? need : need + (gain - need) * releaseCoef;
+    left[i] = left[i]! * gain;
+    right[i] = right[i]! * gain;
   }
   return { left, right };
 }

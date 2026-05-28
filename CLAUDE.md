@@ -147,16 +147,23 @@ Sound is a **separate track muxed by ffmpeg**, not played live — the renderer 
 so the SAME code makes the WAV the renderer muxes AND the PCM the harness plays via Web Audio →
 audio is WYSIWYG like the visuals. Pipeline: `BattleLog -> buildAudioScore() -> renderScore() (stereo
 Float32 PCM) -> pcmToWav()`. No samples — everything is synthesized (oscillators + analytic envelopes).
-- **Always-consonant by construction:** key + tempo are derived from `config.seed`; the scale is
-  **pentatonic** and each team gets a distinct **chord tone**, so any unscripted event ordering is
-  harmonic. Per-team **timbre follows the power archetype** (mirrors `render/glyphs.ts`: square→square
-  wave, triangle→saw, diamond→bell, hexagon→pulse, circle→triangle), so a team sounds like it looks.
-- **Event mapping (`score.ts`):** death = plucked chord-tone whose **octave rises with battle progress**
-  (cumulative deaths trace an ascending melody peaking at the climax — "deaths play a song"), panned by
-  x; explosion = low boom + noise crack; projectileFire = high descending blip; leadChange = rising
-  bell motif (momentum cue); battleEnd = ascending winner arpeggio + pad (skipped on a stalemate).
-- **Musical bed:** a continuous in-key arpeggiated bass + beat pulse whose **intensity swells with
-  on-screen action density** (a deaths/sec envelope), so the music lifts toward the climax/win.
+- **Always-consonant by construction — and STATIC (no rotation):** the root + tempo come from
+  `config.seed`, but the harmony is fixed for the whole battle: one **major-pentatonic** scale (every
+  note mutually consonant) over one sustained **major-6 backing chord** (`music.ts`). Each team owns
+  **one permanent pentatonic note** (`Voice.degree`, never changes) with a **soft, sine-based** archetype
+  timbre (mirrors `render/glyphs.ts`: tank/sustain→sine, aggressive→`boop`, burst→bell, control→triangle
+  — no raw square/saw/pulse, no piano). A team still sounds like it looks, gently.
+- **Event mapping (`score.ts`):** death = the team's one fixed note (NO octave climb, NO rotation),
+  panned by x; explosion = low boom + faint crack; projectileFire = quiet high blip; leadChange =
+  ascending arpeggio of the fixed chord (identical every time); battleEnd = resolving block chord (pad)
+  + ascending arpeggio (skipped on a stalemate).
+- **Musical bed:** the single fixed chord, sustained as a soft pad + low root bass, re-voiced each bar
+  so its **volume swells with on-screen action density** (a deaths/sec envelope) — but the pitches never
+  change. A gentle `boop` sparkle is added only when the action is hot.
+- **Synth (`synth.ts`):** soft, sine-based timbres (short, rolled-off harmonic sums) + gentle envelopes,
+  a one-pole ~6kHz high-cut, and a real **brick-wall peak limiter** (instant attack / ~80ms release,
+  ceiling 0.8) that GUARANTEES the output never approaches full scale — it cannot hard-clip even with
+  many teams stacking events (a unit test pins this; verified ~−1.7 dBFS on a 5-team render).
 - **Renderer:** `cli.ts` re-sims via `runBattle(config)` (deterministic, matches the captured frames)
   to get the log, writes `audio.wav` to the temp frames dir, and `encode()` muxes it
   (`ffmpegArgs(..., audioPath)` adds `-i audio.wav -c:a aac -b:a 192k -shortest`). `--mute` skips it.

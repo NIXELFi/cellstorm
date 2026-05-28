@@ -2,14 +2,22 @@
 // battle log and actual sound: a flat list of timed Notes (times in SECONDS). The synth turns it
 // into PCM; the same score drives the Node WAV mux and the browser Web Audio preview (WYSIWYG).
 
-/** Oscillator timbre. Built from a small harmonic series in the synth (alias-light). */
-export type Timbre = "sine" | "triangle" | "square" | "saw" | "pulse" | "bell" | "noise";
+/**
+ * Oscillator timbre. All are deliberately SOFT and sine-based — a clean, "modernized 8-bit" doot/boop
+ * palette (no raw square/saw/pulse, no bright piano), so a busy multi-team mix stays gentle.
+ */
+export type Timbre =
+  | "sine" // pure, warmest
+  | "triangle" // soft, mostly fundamental
+  | "boop" // soft sine + a faint harmonic — the videogamey doot/boop
+  | "bell" // soft inharmonic bell (sparingly)
+  | "noise"; // only for the explosion "crack", low gain
 
 /** Amplitude envelope shape for a note. */
 export type EnvShape =
-  | "pluck" // fast attack, exponential decay (most events)
-  | "pad" // slow attack, sustain, slow release (winner chord, bed swells)
-  | "blip"; // very short transient (projectiles, beat pulse)
+  | "pluck" // soft attack, gentle exponential decay (most event notes)
+  | "pad" // slow attack, sustain, slow release (chords, bed)
+  | "blip"; // very short, soft transient (beat pulse)
 
 export interface Note {
   /** Start time in seconds. */
@@ -34,12 +42,16 @@ export interface AudioScore {
   notes: Note[];
 }
 
-/** A team's musical identity, derived deterministically from seed + team index + power. */
+/**
+ * A team's musical identity, derived deterministically from seed + team index. Each team owns ONE
+ * fixed pitch (a degree of the shared pentatonic scale) for the whole battle — it never rotates, and
+ * because the scale is pentatonic every team's note is consonant with every other's.
+ */
 export interface Voice {
-  /** Base frequency (the team's chord tone, in the chosen octave) in Hz. */
-  freq: number;
-  /** Scale-degree index of the team's chord tone within the key (for octave shifts). */
+  /** Fixed pentatonic scale-degree index this team always plays. */
   degree: number;
+  /** Fixed octave offset for this team's note. */
+  octave: number;
   timbre: Timbre;
   /** Baseline stereo pan for the team, -1..+1. */
   pan: number;
@@ -48,10 +60,12 @@ export interface Voice {
 export interface Key {
   /** Root frequency (Hz) of the tonic in the base octave. */
   rootFreq: number;
-  /** Semitone offsets of the scale degrees from the root (pentatonic: 5 entries). */
+  /** Semitone offsets of the MAJOR PENTATONIC scale degrees from the root (5 entries). */
   scale: number[];
-  /** Tempo in beats per minute. */
+  /** Semitone offsets of the single fixed backing chord (a lush, consonant major 6). */
+  chordSemitones: number[];
+  /** Tempo in beats per minute (for the bed's timing only — pitches never change). */
   bpm: number;
-  /** Human-readable label, e.g. "A minor pentatonic @ 112bpm" (for debugging). */
+  /** Human-readable label (debugging). */
   label: string;
 }
