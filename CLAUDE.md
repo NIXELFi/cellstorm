@@ -77,9 +77,11 @@ CELLSTORM_DB="$HOME/Developer/cellstorm/data/cellstorm.db" pnpm harness
 pnpm --filter @cellstorm/cli start sweep --db <ABS_PATH> --teams 4 --powers random --seeds 0-200 --batch v1 --concurrency 4 --topn 40
 
 # Render one MP4 (the harness "Render video" button does this via the bridge). Sound is muxed in by
-# default; pass --mute for a silent render. NOTE: --scale must yield EVEN width AND height (libx264
-# + yuv420p reject odd dimensions) — 0.25 -> 540x960 and 0.5 -> 1080x1920 are safe; 0.18 -> 389 is not.
-pnpm --filter @cellstorm/renderer exec tsx src/cli.ts --config <configId|inlineJSON> --db <db> --out out.mp4 --scale 0.5 [--hud '<json>'] [--mute]
+# default; pass --mute for a silent render. Default output is 4K-60 (--scale 1 = 2160x3840). --ss N
+# supersamples then Lanczos-downscales; --crf N sets H.264 quality (default 18, lower=better). NOTE:
+# --scale must yield EVEN width AND height (libx264 + yuv420p reject odd) — 1 -> 2160x3840 and
+# 0.5 -> 1080x1920 are safe; 0.18 -> 389 is not.
+pnpm --filter @cellstorm/renderer exec tsx src/cli.ts --config <configId|inlineJSON> --db <db> --out out.mp4 [--scale 1] [--ss 1] [--crf 18] [--hud '<json>'] [--mute]
 
 # Dev lab:
 pnpm --filter @cellstorm/lab lab {roundrobin|balance|snapshot|scorediff}
@@ -151,8 +153,13 @@ studies (see the `apps/lab/*.mts` scripts; rebuild similar ones to re-tune).
 - **WYSIWYG:** harness preview and the 4K/1080 renderer use the SAME `BattlePlayer` + `CssHud`.
 - Renderer (`apps/renderer`): esbuild bundles `page-entry.ts` (BattlePlayer + pixi) into an IIFE,
   Playwright injects it, steps one frame per tick, **screenshots the full page** (canvas + CSS HUD
-  overlay), waits for `document.fonts.ready`, then ffmpeg → MP4. Default scale 0.5 = **1080×1920**
-  (Shorts-native, ~1–2 min). `scale 1` = 2160×3840 (much slower via per-frame screenshots).
+  overlay), waits for `document.fonts.ready`, then ffmpeg → MP4 at **60fps**. **Default output is full
+  4K (`--scale 1` = 2160×3840)** — 1080p (`--scale 0.5`) is deprecated for delivery (YouTube's re-encode
+  mushes the fine particles/glow). Clean high-bitrate source: **x264 CRF 18, high profile, yuv420p**
+  (tunable `--crf`). A tunable **supersample** (`--ss`, default 1) renders larger then Lanczos-downscales
+  on encode (`SUPERSAMPLE_DEFAULT`). 4K via per-frame screenshots is SLOW (minutes per clip); faster
+  capture (GPU / parallel contexts / JPEG-or-pipe-to-ffmpeg) is an open follow-up. `src/shots.ts` is a
+  screenshot studio for fast visual A/B review (a few ticks per fight, cold-open off, no encode).
 - The harness "Render video" button → `POST /api/render` spawns the renderer CLI, tracks progress
   via stdout, and on success reveals + opens the file via the OS file manager (per-OS commands in
   `apps/harness/src/revealCommands.ts`: Finder/`open` on macOS, Explorer/`start` on Windows,
@@ -168,10 +175,17 @@ studies (see the `apps/lab/*.mts` scripts; rebuild similar ones to re-tune).
     as it dies) + a single **centered, auto-fit** label row (color dot + power name + count). Sits
     on a darkening+blur scrim (`.cs-topscrim`). NO descriptions in the live HUD (they're in intro).
   - **Winner**: glowing "[POWER] WINS" + survivor count over a matching darkening+blur gradient.
-- **Cells (scene.ts):** team color = primary identity; SHAPE = archetype (square=tanky,
-  triangle=aggressive/fast, diamond=burst/ranged, hexagon=control, circle=sustain — `glyphs.ts`).
-  Glow layer + state FX (charger dash trail, plague tint, stun dim, frenzy heat, heal/shield halos)
-  + styled death bursts (Glasshammer shatter, Bomb shockwave). Random per-team spawn locations.
+- **Cells (scene.ts):** team color is the sole identity; every cell is a **flat 2D circle**. (Tier-1
+  removed the per-power archetype SHAPES — `powerStyle`/`glyphs.ts` now only supplies the
+  `frenzy`/`halo`/`death` FX flags, not a rendered shape; audio keeps its own parallel archetype map.)
+  Layer stack bottom→top: background → **velocity trails** (per-cell comet streaks; `trail.ts` /
+  `TRAIL_TUNING`) → faint glow → cells → projectiles → state FX (charger dash trail, plague tint, stun
+  dim, frenzy heat, heal/shield halos) → **death/explosion bursts** (brighter, white-hot cores;
+  Glasshammer shatter, Bomb shockwave; `fx.ts` / `BURST_TUNING`) → **kill-flash rings** (`FlashField` /
+  `FLASH_TUNING`) → **clash sparks** where opposing teams touch (cosmetic adjacency detection on the
+  drawn positions; `clash.ts` / `CLASH_TUNING`). Cell visual radius is render-only (`cellR`, decoupled
+  from collision). Random per-team spawn locations. All FX read only the cosmetic PRNG / drawn state —
+  gameplay RNG untouched, so seeds score identically. Tunables are exported `*_TUNING` constants.
 - **Post-FX (`postfx.ts` + `postfxLogic.ts`):** a filter stack (`pixi-filters`) wraps the scene in the
   player — neon **bloom**, soft **vignette** (a `CRTFilter` with only vignetting on), **color grade**
   (`AdjustmentFilter`), plus **chromatic aberration** + a small **screen shake** that swell on
@@ -180,7 +194,10 @@ studies (see the `apps/lab/*.mts` scripts; rebuild similar ones to re-tune).
   crisp on top. The shake lives on an inner container (vignette stays screen-fixed) with a 1.5%
   overscan so it never exposes the border. ALL reactive uniforms are driven from the **sim tick** (the
   `impact` envelope + winner flash), never wall-clock — so the FX render identically in the headless
-  renderer instead of freezing. The reactive math is pure + unit-tested in `postfxLogic.ts`.
+  renderer instead of freezing. The reactive math is pure + unit-tested in `postfxLogic.ts`. A subtle
+  **gradient dither** (`NoiseFilter` from pixi.js core, seed driven by the tick via `ditherSeed` —
+  `DITHER_TUNING`) is the last filter in the chain, breaking 8-bit banding on the dark glow/vignette
+  gradients (and animated deterministically off the tick, so it's headless-stable too).
 
 ---
 
@@ -240,13 +257,15 @@ Float32 PCM) -> pcmToWav()`. No samples — everything is synthesized (oscillato
 ---
 
 ## Status / possible next steps
-V1 is built and on `main` (merged from `feat/cellstorm-v1`). The renderer produces real 1080×1920
-60fps MP4s with the full broadcast HUD baked in **and a synthesized soundtrack** (see Audio above;
-on `feat/cellstorm-audio`, 173 tests green). The **cold-open flash-forward hook is now built** (see
-"Cold-open hook" under Rendering & HUD — `opening.ts`); it replaced the static title card that was
-causing the ~75% swipe-away. Open follow-ups discussed but not built: kiting AI for ranged powers, a
-render resolution toggle (1080/4K) + faster capture (CDP screencast), and an end-to-end integration
-test for the harness→bridge→render flow.
+V1 is built and on `main`. The renderer produces real **4K (2160×3840) 60fps** MP4s with the full
+broadcast HUD baked in **and a synthesized soundtrack** (see Audio above). The **cold-open flash-forward
+hook** is built (`opening.ts`), replacing the static title card that caused the ~75% swipe-away.
+**Tier-1 visual polish** is now on `main` (260 tests green): flat 2D orbs, velocity trails, kill-flash +
+punchier bursts, clash sparks, gradient dither, and the 4K-60 high-bitrate encode pipeline (CRF 18,
+tunable `--ss`/`--crf`) — all cosmetic, sim byte-identical.
+Open follow-ups: **faster 4K capture** (the slow part now — likely GPU accel and/or parallel render
+contexts and/or JPEG-or-pipe-to-ffmpeg instead of PNG-per-frame; profile first to find the bottleneck),
+kiting AI for ranged powers, and an end-to-end harness→bridge→render integration test.
 Audio follow-ups: richer per-power leitmotifs, sidechain/ducking, and a stereo-width pass.
 
 ## Cross-platform notes (macOS + Windows)
