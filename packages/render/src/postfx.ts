@@ -56,8 +56,10 @@ export class PostFx {
     this.bloom = new AdvancedBloomFilter({ threshold: 0.7, bloomScale: BLOOM_SCALE, brightness: 1, blur: 1.5, quality: 4 });
     this.rgb = new RGBSplitFilter({ red: { x: ABERRATION_BASE, y: 0 }, green: { x: 0, y: 0 }, blue: { x: -ABERRATION_BASE, y: 0 } });
     this.grade = new AdjustmentFilter({ saturation: 1.06, contrast: 1.04, brightness: 1, gamma: 1 });
-    // CRT filter used purely for a barely-there vignette (scanlines / noise / curvature all off).
-    this.vignette = new CRTFilter({ vignetting: 0.06, vignettingAlpha: 1, vignettingBlur: 0.3, lineWidth: 0, lineContrast: 0, noise: 0, curvature: 0 });
+    // CRT filter used purely for a barely-there vignette (scanlines / noise / curvature all off). It
+    // darkens only the canvas (battle), never the DOM HUD, and its darkening lands in the outer margins
+    // that the Shorts UI occludes anyway — kept very low so it can't obscure the action or HUD.
+    this.vignette = new CRTFilter({ vignetting: 0.04, vignettingAlpha: 1, vignettingBlur: 0.3, lineWidth: 0, lineContrast: 0, noise: 0, curvature: 0 });
 
     if (this.enabled) this.outer.filters = [this.bloom, this.rgb, this.grade, this.vignette];
   }

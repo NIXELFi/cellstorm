@@ -11,6 +11,9 @@ export interface HudConfig {
   introTitle: string;
   /** Length of the intro hook, in seconds. */
   introSeconds: number;
+  /** Draw the safe-area boundary + occlusion zones (notch / action column / bottom strip) as colored
+   *  guides, for checking on-device that nothing important is occluded. Off for real renders. */
+  debugSafeArea: boolean;
 }
 
 export const DEFAULT_HUD: HudConfig = {
@@ -20,4 +23,5 @@ export const DEFAULT_HUD: HudConfig = {
   showWinner: true,
   introTitle: "",
   introSeconds: 2.5,
+  debugSafeArea: false,
 };

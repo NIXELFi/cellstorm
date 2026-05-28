@@ -13,6 +13,7 @@ import { DEFAULT_HUD } from "./hud/types";
 import { THEME, type Theme } from "./theme";
 import { powerDesc } from "./descs";
 import { easeCounter, introAlpha, winnerAlpha, leaderTeam } from "./hud/logic";
+import { safeInsetPct } from "./safeArea";
 
 const FONT_LINK_ID = "cs-hud-fonts";
 const STYLE_ID = "cs-hud-style";
@@ -43,6 +44,7 @@ export class CssHud {
   private winnerEl!: HTMLElement;
   private winnerName!: HTMLElement;
   private winnerSub!: HTMLElement;
+  private safeDebug!: HTMLElement;
   private resolvedTick = -1;
   private shownWinner = -2;
 
@@ -122,6 +124,7 @@ export class CssHud {
       const a = this.config.showWinner ? winnerAlpha(winner, since, 0.5) : 0;
       const pop = 0.82 + 0.18 * a; // subtle scale-up as it fades in
       this.winnerEl.style.display = a <= 0.001 ? "none" : "flex";
+      if (a > 0.001) this.fitWinnerName(); // shrink over-long names (GLASSHAMMER/NECROMANCER) to fit
       this.winnerEl.style.opacity = String(a);
       const card = this.winnerEl.firstElementChild as HTMLElement;
       card.style.transform = `scale(${pop.toFixed(3)})`;
@@ -149,6 +152,17 @@ export class CssHud {
   private build(): void {
     this.root.classList.add("cs-hud");
     this.root.innerHTML = "";
+
+    // Expose the safe-area insets as CSS custom properties (percentages of the canvas) so every HUD
+    // element positions inside the safe zone at any resolution. Single source of truth: safeArea.ts.
+    const pct = safeInsetPct();
+    this.root.style.setProperty("--safe-top", `${pct.topPct}%`);
+    this.root.style.setProperty("--safe-bottom", `${pct.bottomPct}%`);
+    this.root.style.setProperty("--safe-left", `${pct.leftPct}%`);
+    this.root.style.setProperty("--safe-right", `${pct.rightPct}%`);
+    // Symmetric horizontal inset (the larger of left/right) so the top counter strip can be CENTERED
+    // in the frame while still clearing the right action-button column.
+    this.root.style.setProperty("--safe-h", `${Math.max(pct.leftPct, pct.rightPct)}%`);
 
     // Subtle brand watermark, painted behind everything (first child). Low opacity so it reads as a
     // ghosted mark, not a label. In the DOM overlay so the canvas post-FX never blurs it.
@@ -223,8 +237,28 @@ export class CssHud {
     this.winnerEl.appendChild(wcard);
     this.winnerEl.style.display = "none";
 
-    // Watermark first (furthest back), then scrim behind the strip, then everything else.
-    this.root.append(this.watermark, this.scrim, this.side, this.intro, this.winnerEl);
+    // Debug safe-area overlay (toggled by config.debugSafeArea) — colored guides for on-device checks.
+    this.safeDebug = el("div", "cs-safe-debug");
+    this.safeDebug.innerHTML =
+      '<div class="cs-sd-zone cs-sd-notch"><span>NOTCH / STATUS BAR</span></div>' +
+      '<div class="cs-sd-zone cs-sd-right"><span>SHORTS BUTTONS</span></div>' +
+      '<div class="cs-sd-zone cs-sd-bottom"><span>CAPTION / SOUND / PROGRESS</span></div>' +
+      '<div class="cs-sd-zone cs-sd-left"></div>' +
+      '<div class="cs-sd-safe"><span>SAFE ZONE</span></div>';
+
+    // Watermark first (furthest back), then scrim behind the strip, then everything else; debug on top.
+    this.root.append(this.watermark, this.scrim, this.side, this.intro, this.winnerEl, this.safeDebug);
+  }
+
+  /** Shrink the winner power name if it would overflow the frame, so long names (GLASSHAMMER,
+   *  NECROMANCER) stay fully on screen with a small side margin instead of bleeding off the edges.
+   *  Centered names just scale toward their center; short names keep full size. */
+  private fitWinnerName(): void {
+    const name = this.winnerName;
+    name.style.transform = "none";
+    const avail = this.winnerEl.clientWidth * 0.9; // ~5% breathing room each side
+    const natural = name.offsetWidth;
+    if (avail > 0 && natural > avail) name.style.transform = `scale(${(avail / natural).toFixed(4)})`;
   }
 
   private fillWinner(winner: number, survivors: number): void {
@@ -239,6 +273,7 @@ export class CssHud {
 
   private applyVisibility(): void {
     this.side.style.display = this.config.showCounters || this.config.showLeaderboard ? "flex" : "none";
+    if (this.safeDebug) this.safeDebug.style.display = this.config.debugSafeArea ? "block" : "none";
   }
 
   private introTitle(): string {
@@ -304,11 +339,15 @@ const CSS = `
   mask-image: linear-gradient(to bottom, #000 55%, transparent 100%);
 }
 .cs-side {
-  position: absolute; top: 1.8cqh; left: 2cqh; right: 2cqh;
+  position: absolute; top: var(--safe-top); left: var(--safe-h); right: var(--safe-h);
   display: flex; flex-direction: column; align-items: center; gap: 0.9cqh;
+  /* Readable backing pill so the counters stay legible over a bright, chaotic battle. */
+  background: rgba(8,5,14,0.5); border: 0.12cqh solid rgba(255,255,255,0.07);
+  border-radius: 2.2cqh; padding: 1cqh 1.6cqh; box-sizing: border-box;
+  -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px);
 }
 .cs-pbar {
-  display: flex; gap: 0.45cqh; height: 1.25cqh; width: 100%;
+  display: flex; gap: 0.45cqh; height: 1.5cqh; width: 100%;
 }
 .cs-seg {
   background: var(--c); border-radius: 1cqh; min-width: 0;
@@ -316,17 +355,19 @@ const CSS = `
 }
 .cs-seg:not(.dead) { min-width: 1.2cqw; }
 .cs-seg.dead { opacity: 0; }
-/* labels: ONE line, sized to content (max-content), centered, then scaled to fit (see fitLabels). */
-.cs-labels { display: flex; flex-wrap: nowrap; align-items: baseline;
-  width: max-content; max-width: none;
-  gap: 2.4cqw; white-space: nowrap; transform-origin: center top; will-change: transform; }
-.cs-lab { display: flex; align-items: baseline; gap: 0.8cqw; }
-.cs-lab-dot { width: 1.7cqw; height: 1.7cqw; border-radius: 50%;
+/* labels: centered rows that WRAP when there are many teams, so 6-team labels stay readable instead
+   of shrinking to fit a single line. Each label stays intact (nowrap); the rows wrap and stay centered.
+   (fitLabels is a harmless no-op now that wrapping handles overflow.) */
+.cs-labels { display: flex; flex-wrap: wrap; justify-content: center; align-items: baseline;
+  width: 100%; gap: 0.7cqh 2.2cqw; }
+.cs-lab { display: flex; align-items: baseline; gap: 0.8cqw; white-space: nowrap; }
+.cs-lab-dot { width: 1.9cqw; height: 1.9cqw; border-radius: 50%;
   background: var(--c); align-self: center; box-shadow: 0 0 0.7cqh var(--c); }
-.cs-lab-name { font-weight: 700; font-size: 2.4cqw; letter-spacing: 0.04em;
+.cs-lab-name { font-weight: 700; font-size: 2.8cqw; letter-spacing: 0.04em;
   text-transform: uppercase; color: var(--c); text-shadow: 0 0.15cqh 0.6cqh rgba(0,0,0,0.7); }
-.cs-lab-count { font-family: var(--display); font-size: 3.3cqw; color: #fff;
-  font-variant-numeric: tabular-nums; text-shadow: 0 0.15cqh 0.6cqh rgba(0,0,0,0.8); }
+.cs-lab-count { font-family: var(--display); font-size: 3.7cqw; color: #fff;
+  font-variant-numeric: tabular-nums; min-width: 3ch; text-align: center;
+  text-shadow: 0 0.15cqh 0.6cqh rgba(0,0,0,0.8); }
 .cs-lab.dead { opacity: 0.32; }
 .cs-lab.dead .cs-lab-name { text-decoration: line-through; }
 .cs-lab.lead .cs-lab-dot { box-shadow: 0 0 1.6cqh var(--c); }
@@ -374,4 +415,26 @@ const CSS = `
   letter-spacing: 0.14em; -webkit-text-stroke: 0.2cqh color-mix(in srgb, var(--c) 70%, transparent); }
 .cs-winner-sub { font-size: 1.6cqh; font-weight: 600; letter-spacing: 0.07em; color: rgba(232,232,236,0.75);
   text-transform: uppercase; }
+
+/* Debug safe-area overlay (config.debugSafeArea): green = safe zone; red = Shorts/iPhone occlusion. */
+.cs-safe-debug { position: absolute; inset: 0; display: none; pointer-events: none; }
+.cs-safe-debug .cs-sd-zone { position: absolute; }
+.cs-sd-notch { top: 0; left: 0; right: 0; height: var(--safe-top);
+  background: rgba(255,45,45,0.22); border-bottom: 0.3cqh dashed #ff6464; }
+.cs-sd-bottom { left: 0; right: 0; bottom: 0; height: var(--safe-bottom);
+  background: rgba(255,45,45,0.18); border-top: 0.3cqh dashed #ff6464; }
+.cs-sd-right { top: 0; bottom: 0; right: 0; width: var(--safe-right);
+  background: rgba(255,45,45,0.18); border-left: 0.3cqh dashed #ff6464; }
+.cs-sd-left { top: 0; bottom: 0; left: 0; width: var(--safe-left); background: rgba(255,210,0,0.14); }
+.cs-safe-debug .cs-sd-safe { position: absolute;
+  top: var(--safe-top); bottom: var(--safe-bottom); left: var(--safe-left); right: var(--safe-right);
+  border: 0.4cqh solid #38ff8e; box-shadow: 0 0 2cqh rgba(56,255,142,0.5); }
+.cs-safe-debug span { position: absolute; font-family: var(--display); font-size: 1.7cqh;
+  letter-spacing: 0.08em; color: #fff; white-space: nowrap;
+  background: rgba(0,0,0,0.55); padding: 0.3cqh 0.7cqh; border-radius: 0.5cqh; }
+.cs-sd-notch span { top: 0.5cqh; left: 50%; transform: translateX(-50%); color: #ffd0d0; }
+.cs-sd-bottom span { bottom: 0.5cqh; left: 50%; transform: translateX(-50%); color: #ffd0d0; }
+.cs-sd-right span { top: 50%; right: 0.4cqh; transform-origin: right center;
+  transform: translateY(-50%) rotate(-90deg); color: #ffd0d0; }
+.cs-safe-debug .cs-sd-safe span { top: 0.6cqh; left: 0.6cqh; color: #9affc9; }
 `;

@@ -30,6 +30,8 @@ export interface RenderCliArgs {
   fps?: string;
   keep?: boolean;
   mute?: boolean;
+  /** Draw the safe-area debug guides for an on-device occlusion check. */
+  "debug-safe"?: boolean;
 }
 
 export function parseRenderArgs(argv: string[]): RenderCliArgs {
@@ -45,6 +47,7 @@ export function parseRenderArgs(argv: string[]): RenderCliArgs {
       fps: { type: "string" },
       keep: { type: "boolean" },
       mute: { type: "boolean" },
+      "debug-safe": { type: "boolean" },
     },
   });
   return values as RenderCliArgs;
@@ -88,6 +91,7 @@ async function main(argv: string[]): Promise<void> {
 
   const config = resolveConfig(args.config, args.db);
   const hud = resolveHud(args.hud);
+  if (args["debug-safe"]) hud.debugSafeArea = true;
   const width = resolveWidth(args.scale);
   const maxFrames = args.maxframes ? Number(args.maxframes) : undefined;
   const fps = args.fps ? Number(args.fps) : 60;

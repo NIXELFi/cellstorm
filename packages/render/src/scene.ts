@@ -13,6 +13,7 @@ import type { ArenaParams, World } from "@cellstorm/sim";
 import { THEME, type Theme } from "./theme";
 import type { ParticleField } from "./fx";
 import { addShape, powerStyle, type PowerStyle } from "./glyphs";
+import { ACTION_ZOOM, actionTransform } from "./safeArea";
 
 const HEAL = 0x6ef0a0;
 const POISON = 0x7fe04a;
@@ -47,6 +48,14 @@ export class PixiScene {
       this.trail, this.glowLayer, this.cellLayer, this.projLayer, this.fxLayer, this.particleLayer,
     );
     app.stage.addChild(this.root);
+    // Off-by-default render-side inward scale so the meaningful action stays inside the safe zone.
+    // ACTION_ZOOM=0 → identity (full-bleed look + outcomes unchanged); >0 → pull the battle inward
+    // (margins fall back to the page background). Purely compositing; never touches the sim.
+    if (ACTION_ZOOM > 0) {
+      const t = actionTransform(this.arena.width * this.scale, this.arena.height * this.scale, ACTION_ZOOM);
+      this.root.scale.set(t.scale);
+      this.root.position.set(t.x, t.y);
+    }
     this.trail
       .rect(0, 0, this.arena.width * this.scale, this.arena.height * this.scale)
       .fill({ color: this.theme.background, alpha: 1 });
