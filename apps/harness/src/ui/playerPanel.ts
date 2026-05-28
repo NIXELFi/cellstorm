@@ -1,14 +1,14 @@
-// Player panel: creates a Pixi Application and a BattlePlayer for the selected config on a 9:16
-// canvas, with play/pause, step, scrub (slider -> seekTo), speed, and "jump to climax" (fetch the
-// log, find the densest death cluster in the final portion, seekTo it). The BattlePlayer is the
-// SAME class the 4K renderer uses, so this preview is WYSIWYG.
+// Player panel: creates a Pixi Application + BattlePlayer and REPLAYS the authoritative Node
+// simulation (drawable frames fetched from the bridge) — it does NOT re-simulate in the browser.
+// The sim is not bit-identical across V8 builds (FMA contraction), so the browser must only draw;
+// this guarantees the preview matches the headless render exactly. Playback/scrub/climax are all
+// index-based over the fetched frame array.
 
 import { Application } from "pixi.js";
 import { BattlePlayer, type HudConfig, type Theme } from "@cellstorm/render";
 import { DEFAULT_HUD } from "@cellstorm/render";
-import type { BattleConfig } from "@cellstorm/sim";
-import { configIdOf } from "@cellstorm/cli/config-id";
-import { fetchLog, startRender, fetchRenderProgress } from "../api";
+import type { BattleConfig, BattleLog, DrawFrame, SimEvent } from "@cellstorm/sim";
+import { fetchFrames, startRender, fetchRenderProgress } from "../api";
 import { climaxTick } from "./logLogic";
 import { PreviewAudio } from "./previewAudio";
 import { audioShouldPlay } from "./previewAudioLogic";
@@ -32,13 +32,22 @@ export class PlayerPanel {
   private rafId?: number;
   private scrub!: HTMLInputElement;
   private frameLabel!: HTMLElement;
-  private hudOverlay?: HTMLElement; // DOM layer over the canvas for the CSS broadcast HUD
-  private endFrame = -1; // total playback length (frames) once the battle has ended
+  private playPauseBtn!: HTMLButtonElement;
+  private hudOverlay?: HTMLElement;
   private renderCmd!: HTMLElement;
   private onPlayerReady?: (h: PlayerPanelHandle) => void;
   private readonly audio = new PreviewAudio();
   private soundOn = false;
   private speed = 1;
+
+  // Replay state — the authoritative Node frames + per-tick events.
+  private frames: DrawFrame[] = [];
+  private eventsByFrame: SimEvent[][] = [];
+  private log?: BattleLog;
+  private idxF = 0; // current (fractional) frame index
+  private lastDrawn = -1;
+  private playing = false;
+  private loadToken = 0; // guards against a superseded async frame load
 
   constructor() {
     this.el = document.createElement("div");
@@ -54,11 +63,9 @@ export class PlayerPanel {
     this.el.append(header, this.mount, this.controls);
   }
 
-  /** Register a callback fired whenever a new BattlePlayer is created (HUD/tuning panels bind to it). */
   onReady(cb: (h: PlayerPanelHandle) => void): void {
     this.onPlayerReady = cb;
   }
-
   getPlayer(): BattlePlayer | undefined {
     return this.player;
   }
@@ -69,7 +76,6 @@ export class PlayerPanel {
     return { ...this.hud };
   }
 
-  /** Load a config, recreating the Pixi app + player. `hud`/`theme` override the defaults. */
   async load(config: BattleConfig, hud?: HudConfig, theme?: Theme): Promise<void> {
     this.config = config;
     if (hud) this.hud = hud;
@@ -77,7 +83,6 @@ export class PlayerPanel {
     await this.rebuild();
   }
 
-  /** Re-instantiate the player with the current config/hud/theme (used by the tuning panel). */
   async rebuild(configOverride?: BattleConfig): Promise<void> {
     if (configOverride) this.config = configOverride;
     if (!this.config) return;
@@ -89,7 +94,6 @@ export class PlayerPanel {
       const app = new Application();
       await app.init({ width: w, height: h, background: 0x050008, antialias: true });
       this.app = app;
-      // Wrap canvas + an absolutely-positioned overlay so the CSS HUD composites on top.
       this.mount.innerHTML = "";
       const wrap = document.createElement("div");
       wrap.className = "stage-wrap";
@@ -105,59 +109,104 @@ export class PlayerPanel {
       if (wrap) wrap.style.cssText = `position:relative;width:${w}px;height:${h}px;`;
     }
 
-    this.endFrame = -1; // reset playback-length tracking for the new battle
+    this.frames = [];
+    this.eventsByFrame = [];
+    this.idxF = 0;
+    this.lastDrawn = -1;
+    this.playing = false;
     this.player = new BattlePlayer(this.app, {
-      config: this.config,
-      hud: this.hud,
-      resolutionScale: PREVIEW_SCALE,
-      theme: this.theme,
-      hudRoot: this.hudOverlay,
+      config: this.config, hud: this.hud, resolutionScale: PREVIEW_SCALE, theme: this.theme, hudRoot: this.hudOverlay,
     });
     this.renderControls();
     this.startLoop();
     this.onPlayerReady?.({ player: this.player, config: this.config });
+    void this.loadFrames();
+  }
+
+  /** Fetch the authoritative Node frames for the current config and draw the first one. */
+  private async loadFrames(): Promise<void> {
+    if (!this.config) return;
+    const token = ++this.loadToken;
+    this.frameLabel.textContent = "loading…";
+    try {
+      const { frames, log } = await fetchFrames(this.config);
+      if (token !== this.loadToken) return; // a newer load superseded this one
+      this.frames = frames;
+      this.log = log;
+      this.eventsByFrame = frames.map(() => []);
+      for (const e of log.events) {
+        if (e.tick >= 0 && e.tick < this.eventsByFrame.length) this.eventsByFrame[e.tick]!.push(e);
+      }
+      this.audio.setLog(log);
+      this.scrub.max = String(Math.max(1, frames.length - 1));
+      this.lastDrawn = -1;
+      this.idxF = 0;
+      this.drawAt(0, false);
+    } catch (err) {
+      if (token === this.loadToken) this.frameLabel.textContent = `load failed: ${err instanceof Error ? err.message : String(err)}`;
+    }
   }
 
   private startLoop(): void {
     if (this.rafId) cancelAnimationFrame(this.rafId);
     const tick = () => {
-      if (this.player) {
-        this.player.advanceBySpeed();
-        this.syncScrub();
+      if (this.playing && this.frames.length > 0) {
+        const last = this.frames.length - 1;
+        this.idxF = Math.min(this.idxF + this.speed, last);
+        const i = Math.floor(this.idxF);
+        if (i !== this.lastDrawn) this.drawAt(i, true);
+        if (this.idxF >= last) {
+          this.setPlaying(false);
+          this.audio.stop();
+        }
       }
       this.rafId = requestAnimationFrame(tick);
     };
     this.rafId = requestAnimationFrame(tick);
   }
 
-  private syncScrub(): void {
-    if (!this.player || !this.config) return;
-    if (this.player.ended && this.endFrame < 0) {
-      this.endFrame = this.player.frame;
-      this.audio.stop(); // soundtrack ends with the battle
+  /** Draw frame `i`. When `withEvents`, replay the events of every frame since the last drawn one
+   *  (so cosmetic FX + the shake/aberration impact fire); on a scrub/seek we draw without events. */
+  private drawAt(i: number, withEvents: boolean): void {
+    if (!this.player) return;
+    const f = this.frames[i];
+    if (!f) return;
+    let evs: SimEvent[] = [];
+    if (withEvents && i > this.lastDrawn) {
+      for (let j = this.lastDrawn + 1; j <= i; j++) evs = evs.concat(this.eventsByFrame[j] ?? []);
     }
-    const total = this.endFrame > 0 ? this.endFrame : this.config.maxTicks;
-    this.scrub.max = String(total);
-    this.scrub.value = String(this.player.frame);
-    const sec = (this.player.frame / 60).toFixed(1);
-    this.frameLabel.textContent =
-      this.endFrame > 0 ? `${sec}s / ${(this.endFrame / 60).toFixed(1)}s (ended)` : `${sec}s`;
+    this.player.renderSnapshot(f, withEvents ? evs : []);
+    this.lastDrawn = i;
+    this.idxF = i;
+    this.updateLabel(i);
+  }
+
+  private updateLabel(i: number): void {
+    const last = this.frames.length - 1;
+    this.scrub.value = String(i);
+    const sec = (i / 60).toFixed(1);
+    this.frameLabel.textContent = i >= last && last > 0 ? `${sec}s / ${(last / 60).toFixed(1)}s (ended)` : `${sec}s`;
+  }
+
+  private setPlaying(p: boolean): void {
+    this.playing = p;
+    this.playPauseBtn.textContent = p ? "Pause" : "Play";
   }
 
   private renderControls(): void {
     this.controls.innerHTML = "";
     const playPause = document.createElement("button");
+    this.playPauseBtn = playPause;
     playPause.className = "btn";
     playPause.textContent = "Play";
     playPause.onclick = () => {
-      if (!this.player) return;
-      if (this.player.isPlaying) {
-        this.player.pause();
-        playPause.textContent = "Play";
+      if (this.frames.length === 0) return;
+      if (this.playing) {
+        this.setPlaying(false);
         this.audio.stop();
       } else {
-        this.player.play();
-        playPause.textContent = "Pause";
+        if (this.idxF >= this.frames.length - 1) { this.idxF = 0; this.lastDrawn = -1; } // replay from start
+        this.setPlaying(true);
         this.syncAudio();
       }
     };
@@ -166,14 +215,15 @@ export class PlayerPanel {
     stepBtn.className = "btn";
     stepBtn.textContent = "Step";
     stepBtn.onclick = () => {
-      this.player?.stepFrame();
-      this.syncScrub();
+      if (this.frames.length === 0) return;
+      this.setPlaying(false);
+      this.drawAt(Math.min(this.lastDrawn + 1, this.frames.length - 1), true);
     };
 
     const climax = document.createElement("button");
     climax.className = "btn";
     climax.textContent = "Jump to climax";
-    climax.onclick = () => void this.jumpToClimax();
+    climax.onclick = () => this.jumpToClimax();
 
     const sendRender = document.createElement("button");
     sendRender.className = "btn";
@@ -203,28 +253,24 @@ export class PlayerPanel {
     }
     speedSel.onchange = () => {
       this.speed = Number(speedSel.value);
-      this.player?.setSpeed(this.speed);
-      // Soundtrack only stays in sync at 1x; restart or stop accordingly.
-      if (this.soundOn && this.player?.isPlaying) this.syncAudio();
+      if (this.soundOn && this.playing) this.syncAudio();
     };
 
     this.scrub = document.createElement("input");
     this.scrub.type = "range";
     this.scrub.min = "0";
-    this.scrub.max = String(this.config?.maxTicks ?? 1000);
+    this.scrub.max = String(Math.max(1, this.frames.length - 1));
     this.scrub.value = "0";
     this.scrub.className = "scrub";
     this.scrub.oninput = () => {
-      this.player?.pause();
-      playPause.textContent = "Play";
-      this.audio.stop(); // scrubbing breaks sync; sound resumes on the next Play
-      this.player?.seekTo(Number(this.scrub.value));
-      this.frameLabel.textContent = `${this.scrub.value}t`;
+      this.setPlaying(false);
+      this.audio.stop();
+      this.drawAt(Number(this.scrub.value), false);
     };
 
     this.frameLabel = document.createElement("span");
     this.frameLabel.className = "muted frame-label";
-    this.frameLabel.textContent = "0t";
+    this.frameLabel.textContent = "0s";
 
     const row1 = document.createElement("div");
     row1.className = "inline";
@@ -240,11 +286,10 @@ export class PlayerPanel {
     this.controls.append(row1, row2, this.renderCmd);
   }
 
-  /** Render this candidate (config + current HUD) to an MP4 via the bridge, showing live progress.
-   * When it finishes, the bridge reveals the file in Finder and opens it for playback. */
+  /** Render this candidate to an MP4 via the bridge using the EXACT current config (Node-simulated,
+   *  matching this preview), showing live progress; the bridge reveals + opens it when done. */
   private async sendToRender(): Promise<void> {
     if (!this.config) return;
-    const configId = configIdOf(this.config);
     this.renderCmd.hidden = false;
     this.renderCmd.innerHTML = "";
     const status = document.createElement("div");
@@ -254,7 +299,7 @@ export class PlayerPanel {
 
     let renderId: string;
     try {
-      ({ renderId } = await startRender(configId, this.hud));
+      ({ renderId } = await startRender(this.config, this.hud));
     } catch (err) {
       status.textContent = `Couldn't start render: ${err instanceof Error ? err.message : String(err)}`;
       return;
@@ -276,37 +321,26 @@ export class PlayerPanel {
     }, 700);
   }
 
-  /** Start the soundtrack from the current frame when conditions allow; otherwise ensure silence. */
   private syncAudio(): void {
-    if (!this.player || !this.config) return;
-    const ok = audioShouldPlay({
-      enabled: this.soundOn,
-      playing: this.player.isPlaying,
-      speed: this.speed,
-      ended: this.player.ended,
-    });
-    if (ok) this.audio.start(this.config, this.player.frame);
+    const last = this.frames.length - 1;
+    const ok = audioShouldPlay({ enabled: this.soundOn, playing: this.playing, speed: this.speed, ended: this.idxF >= last });
+    if (ok) this.audio.start(Math.floor(this.idxF));
     else this.audio.stop();
   }
 
-  private async jumpToClimax(): Promise<void> {
-    if (!this.player || !this.config) return;
-    try {
-      const id = configIdOf(this.config);
-      const log = await fetchLog(id);
-      const tick = climaxTick(log);
-      this.player.pause();
-      this.player.seekTo(tick);
-      this.syncScrub();
-    } catch {
-      /* no log available; ignore */
-    }
+  private jumpToClimax(): void {
+    if (!this.log || this.frames.length === 0) return;
+    const tick = Math.min(climaxTick(this.log), this.frames.length - 1);
+    this.setPlaying(false);
+    this.audio.stop();
+    this.lastDrawn = -1; // force a fresh draw without replaying intervening events
+    this.drawAt(tick, false);
   }
 
   private teardownPlayer(): void {
     if (this.rafId) cancelAnimationFrame(this.rafId);
     this.rafId = undefined;
-    this.audio.invalidate(); // config is about to change; drop the cached soundtrack
+    this.audio.invalidate();
     this.player?.destroy();
     this.player = undefined;
   }

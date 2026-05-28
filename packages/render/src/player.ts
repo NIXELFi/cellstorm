@@ -9,7 +9,8 @@
 // it on rAF, the renderer once per output frame.
 
 import { Application } from "pixi.js";
-import { makePrng, EventSink, type BattleConfig } from "@cellstorm/sim";
+import { makePrng, EventSink, powerByName, BASE_RADIUS, type BattleConfig, type DrawFrame, type SimEvent } from "@cellstorm/sim";
+import type { World } from "@cellstorm/sim";
 import { PixiScene } from "./scene";
 import { powerStyle } from "./glyphs";
 import { CssHud } from "./cssHud";
@@ -46,6 +47,7 @@ export class BattlePlayer {
   private cosmetic: ParticleField;
   private readonly postfx: PostFx;
   private impact = 0; // 0..1 screen-shake / aberration envelope, decays each tick
+  private teamRadii: number[] = []; // per-team cell radius, for reconstructing draw-worlds on replay
   private state: SimState;
   private sink: EventSink;
   private drainedEvents = 0;
@@ -161,25 +163,55 @@ export class BattlePlayer {
 
   private drainNewEvents(): void {
     const events = this.sink.events;
-    for (let i = this.drainedEvents; i < events.length; i++) {
-      const e = events[i]!;
-      switch (e.type) {
-        case "death": {
-          // Death burst styled by the dying team's power: Glasshammer shatters into fast shards.
-          const style = powerStyle(this.config.powers[e.team] ?? "");
-          if (style.death === "shatter") this.cosmetic.spawn(e.x, e.y, e.team, 12, { speed: 7, life: 22 });
-          else this.cosmetic.spawn(e.x, e.y, e.team, 5);
-          break;
-        }
-        case "explosion":
-          // Bomb: a big even radial shockwave ring.
-          this.cosmetic.spawn(e.x, e.y, e.team, 22, { ring: true, speed: 6, life: 20 });
-          break;
-        default:
-          break;
-      }
-    }
+    for (let i = this.drainedEvents; i < events.length; i++) this.applyEventFx(events[i]!);
     this.drainedEvents = events.length;
+  }
+
+  /** Spawn cosmetic particles for one event. Shared by live stepping and snapshot replay. */
+  private applyEventFx(e: SimEvent): void {
+    switch (e.type) {
+      case "death": {
+        // Death burst styled by the dying team's power: Glasshammer shatters into fast shards.
+        const style = powerStyle(this.config.powers[e.team] ?? "");
+        if (style.death === "shatter") this.cosmetic.spawn(e.x, e.y, e.team, 12, { speed: 7, life: 22 });
+        else this.cosmetic.spawn(e.x, e.y, e.team, 5);
+        break;
+      }
+      case "explosion":
+        this.cosmetic.spawn(e.x, e.y, e.team, 22, { ring: true, speed: 6, life: 20 });
+        break;
+      default:
+        break;
+    }
+  }
+
+  /**
+   * Draw one Node-computed frame (single source of truth) instead of stepping our own sim. The
+   * renderer and harness both feed DrawFrames produced once in Node, so what's drawn is identical on
+   * every engine. `newEvents` are this tick's events (for cosmetic FX + the impact envelope).
+   */
+  renderSnapshot(frame: DrawFrame, newEvents: SimEvent[]): void {
+    this.state = { world: this.reconstructWorld(frame), ended: frame.resolvedFrame >= 0 };
+    for (const e of newEvents) this.applyEventFx(e);
+    this.impact = decayImpact(this.impact, impactFromEvents(newEvents), IMPACT_DECAY);
+    this.cosmetic.advance();
+    this.render();
+  }
+
+  /** Rebuild a draw-only World from a DrawFrame so scene/HUD code runs unchanged. */
+  private reconstructWorld(frame: DrawFrame): World {
+    if (this.teamRadii.length === 0) {
+      this.teamRadii = this.config.powers.map((p) => BASE_RADIUS * (powerByName(p).radius ?? 1));
+    }
+    const cells = frame.cells.map((c) => ({
+      alive: true, team: c.team, x: c.x, y: c.y, hp: c.hpFrac, maxHp: 1,
+      radius: c.radius || this.teamRadii[c.team] || BASE_RADIUS,
+      vx: c.vx, vy: c.vy, dash: c.dash, stunT: c.stunT, plagueT: c.plagueT,
+    }));
+    return {
+      cfg: this.config, cells, projectiles: frame.projectiles,
+      frame: frame.frame, winner: frame.winner, resolvedFrame: frame.resolvedFrame,
+    } as unknown as World;
   }
 
   private render(): void {

@@ -20,7 +20,7 @@ import { dirname, join, resolve, extname, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { Store, type SweepSpec } from "@cellstorm/cli";
-import { runBattle, POWER_NAMES, normalizeConfig, type BattleConfig } from "@cellstorm/sim";
+import { runBattle, captureFrames, packFrames, POWER_NAMES, normalizeConfig, type BattleConfig } from "@cellstorm/sim";
 import type { ScoreProfile } from "@cellstorm/score";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -235,6 +235,27 @@ async function handleApi(
     return true;
   }
 
+  // POST /api/frames  body: { config } — the authoritative Node simulation as packed drawable
+  // frames + the log. The harness preview DRAWS these instead of re-simming in the browser, so
+  // preview == render (the sim is NOT bit-identical across V8 builds — FMA contraction — so the
+  // browser must never simulate independently). Takes the full config (not an id) so tuning shows.
+  if (method === "POST" && path === "/api/frames") {
+    let body: { config?: BattleConfig };
+    try {
+      body = JSON.parse((await readBody(req)) || "{}");
+    } catch {
+      sendJson(res, 400, { error: "invalid json" });
+      return true;
+    }
+    if (!body.config) {
+      sendJson(res, 400, { error: "config required" });
+      return true;
+    }
+    const { log, frames } = captureFrames(normalizeConfig(body.config));
+    sendJson(res, 200, { framesB64: Buffer.from(packFrames(frames)).toString("base64"), log });
+    return true;
+  }
+
   // POST /api/sweep  — body: { spec, batchId?, concurrency?, topNlogs?, profile? }
   if (method === "POST" && path === "/api/sweep") {
     const raw = await readBody(req);
@@ -281,19 +302,19 @@ async function handleApi(
   // POST /api/render  body: { configId, hud?, scale? } — render an MP4 for a candidate, then
   // reveal it in Finder and open it for playback (macOS `open`). Returns a renderId to poll.
   if (method === "POST" && path === "/api/render") {
-    let body: { configId?: string; hud?: unknown; scale?: number };
+    let body: { config?: BattleConfig; hud?: unknown; scale?: number };
     try {
       body = JSON.parse((await readBody(req)) || "{}");
     } catch {
       sendJson(res, 400, { error: "invalid json" });
       return true;
     }
-    if (!body.configId) {
-      sendJson(res, 400, { error: "configId required" });
+    if (!body.config) {
+      sendJson(res, 400, { error: "config required" });
       return true;
     }
     try {
-      sendJson(res, 200, startRender(body.configId, body.hud, body.scale));
+      sendJson(res, 200, startRender(body.config, body.hud, body.scale));
     } catch (err) {
       sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) });
     }
@@ -378,15 +399,17 @@ const renders = new Map<string, RenderState>();
  * reveal it in Finder and open it for playback. Defaults to a 1080-wide (Shorts) render for speed;
  * pass scale=1 for full 2160px. Progress is parsed from the CLI's stdout.
  */
-function startRender(configId: string, hud: unknown, scale?: number): { renderId: string; out: string } {
+function startRender(config: BattleConfig, hud: unknown, scale?: number): { renderId: string; out: string } {
   const repoRoot = resolve(__dirname, "..", "..", "..");
   const outDir = join(repoRoot, "out");
   mkdirSync(outDir, { recursive: true });
-  const safe = configId.replace(/[^a-zA-Z0-9]+/g, "_");
+  // Pass the FULL config (inline JSON) — not an id — so the render is the exact battle previewed
+  // (including any tuning). The renderer simulates it in Node, matching the preview's Node frames.
+  const safe = `${config.teamCount}_${config.powers.join("_")}_${config.seed}`.replace(/[^a-zA-Z0-9]+/g, "_");
   const out = join(outDir, `${safe}-${Date.now()}.mp4`);
   const cliEntry = resolve(__dirname, "..", "..", "renderer", "src", "cli.ts");
   const args = [
-    cliEntry, "--config", configId, "--db", DB_PATH, "--out", out,
+    cliEntry, "--config", JSON.stringify(config), "--out", out,
     "--scale", String(scale && scale > 0 ? scale : 0.5),
   ];
   if (hud) args.push("--hud", JSON.stringify(hud));

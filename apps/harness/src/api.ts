@@ -3,7 +3,7 @@
 // bridge serves both the assets and the API. URL builders are PURE and unit-tested (see
 // test/api.test.ts) so query encoding can't silently regress.
 
-import type { BattleConfig, BattleLog } from "@cellstorm/sim";
+import { unpackFrames, type BattleConfig, type BattleLog, type DrawFrame } from "@cellstorm/sim";
 import type { ResultRow, SweepSpec } from "@cellstorm/cli";
 import type { ScoreProfile } from "@cellstorm/score";
 
@@ -62,6 +62,23 @@ export function fetchLog(id: string): Promise<BattleLog> {
 export function fetchLogCached(id: string): Promise<BattleLog> {
   return getJson<BattleLog>(`${logUrl(id)}?cachedOnly=1`);
 }
+/** Fetch the authoritative Node simulation for a config: drawable frames (unpacked) + the battle
+ *  log. The preview DRAWS these rather than re-simming, so it matches the headless render
+ *  bit-for-bit. Posts the full config (not an id) so tuning is reflected. */
+export async function fetchFrames(config: BattleConfig): Promise<{ frames: DrawFrame[]; log: BattleLog }> {
+  const res = await fetch("/api/frames", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ config }),
+  });
+  if (!res.ok) throw new Error(`POST /api/frames -> ${res.status}`);
+  const { framesB64, log } = (await res.json()) as { framesB64: string; log: BattleLog };
+  const bin = atob(framesB64);
+  const u8 = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+  return { frames: unpackFrames(u8), log };
+}
+
 export function fetchPowers(): Promise<string[]> {
   return getJson<string[]>("/api/powers");
 }
@@ -78,14 +95,14 @@ export interface RenderState {
   error?: string;
 }
 export async function startRender(
-  configId: string,
+  config: BattleConfig,
   hud: unknown,
   scale?: number,
 ): Promise<{ renderId: string; out: string }> {
   const res = await fetch("/api/render", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ configId, hud, scale }),
+    body: JSON.stringify({ config, hud, scale }),
   });
   if (!res.ok) throw new Error(`POST /api/render -> ${res.status}`);
   return (await res.json()) as { renderId: string; out: string };

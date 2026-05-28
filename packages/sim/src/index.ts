@@ -18,6 +18,10 @@ export type { BattleConfigInput } from "./config";
 export { EventSink } from "./events";
 export type { SimEvent } from "./events";
 
+// Single-source-of-truth rendering: capture drawable per-tick frames in Node, ship to any renderer.
+export { captureFrames, toDrawFrame, packFrames, unpackFrames } from "./drawframe";
+export type { DrawFrame, DrawCell, DrawProj } from "./drawframe";
+
 // PRNG helpers (re-exported so downstream packages import from the package root).
 export { makePrng, randInt, shuffle } from "./prng";
 export type { Prng } from "./prng";
