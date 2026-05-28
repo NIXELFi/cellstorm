@@ -6,6 +6,7 @@ import "./styles.css";
 import { fetchConfig } from "./api";
 import { SweepBuilder } from "./ui/sweepBuilder";
 import { RankedGrid } from "./ui/rankedGrid";
+import { ProfileEditor } from "./ui/profileEditor";
 import { PlayerPanel } from "./ui/playerPanel";
 import { HudEditor } from "./ui/hudEditor";
 import { TuningPanel } from "./ui/tuningPanel";
@@ -32,6 +33,12 @@ const grid = new RankedGrid({
   },
 });
 
+// ScoreProfile editor: edits weights/gates and live re-ranks the grid over cached logs.
+const profileEditor = new ProfileEditor({
+  onChange: (profile) => grid.setProfile(profile),
+});
+grid.setProfile(profileEditor.getProfile());
+
 const builder = new SweepBuilder({
   onBatch: (batchId) => {
     grid.setBatch(batchId);
@@ -47,7 +54,7 @@ const builder = new SweepBuilder({
 // Layout
 const left = document.createElement("div");
 left.className = "col col-left";
-left.append(builder.el, grid.el);
+left.append(builder.el, profileEditor.el, grid.el);
 
 const center = document.createElement("div");
 center.className = "col col-center";

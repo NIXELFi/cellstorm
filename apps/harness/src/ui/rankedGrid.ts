@@ -1,12 +1,18 @@
 // Ranked candidate grid: fetches /api/results and renders a card per battle (team color swatches
-// + power names, score, winner badge), sorted by score (the API already returns score DESC).
-// Clicking a card opens the player for that config. Each card lazily renders its population
-// sparkline from the battle log.
+// + power names, score, winner badge). It supports LIVE re-ranking under an edited ScoreProfile:
+// when the profile changes, each loaded candidate's cached log is re-scored client-side via
+// score(log, profile) and the grid re-sorts by the new score — NO re-simulation, NO sweep. Logs
+// are fetched once via GET /api/log/:id and cached in the browser, so subsequent weight tweaks are
+// instant. Gate failures (passed=false) sort to the bottom and are visually marked. The pure
+// re-rank math lives in rerankLogic; this file is DOM wiring + the browser log cache.
 
 import type { ResultRow } from "@cellstorm/cli";
+import type { BattleLog } from "@cellstorm/sim";
+import { DEFAULT_PROFILE, type ScoreProfile } from "@cellstorm/score";
 import { THEME, teamColor, teamName } from "@cellstorm/render";
 import { fetchResults, fetchLog } from "../api";
 import { drawSparkline } from "./sparkline";
+import { rerankCandidates, type RankedCandidate } from "./rerankLogic";
 
 function hex(color: number): string {
   return `#${color.toString(16).padStart(6, "0")}`;
@@ -21,6 +27,12 @@ export class RankedGrid {
   private readonly list: HTMLElement;
   private readonly opts: RankedGridOptions;
   private currentBatch?: string;
+
+  // State for live re-ranking.
+  private rows: ResultRow[] = [];
+  private profile: ScoreProfile = DEFAULT_PROFILE;
+  // Browser-side log cache (configId -> log) so re-ranking on profile tweaks never refetches.
+  private readonly logCache = new Map<string, BattleLog>();
 
   constructor(opts: RankedGridOptions) {
     this.opts = opts;
@@ -43,6 +55,15 @@ export class RankedGrid {
     this.currentBatch = batch;
   }
 
+  /** Set the active ScoreProfile and re-rank the loaded candidates over their cached logs. */
+  setProfile(profile: ScoreProfile): void {
+    this.profile = profile;
+    // Ensure logs for the loaded candidates are fetched+cached, then re-render in new order.
+    void this.ensureLogs().then(() => this.renderRanked());
+    // Render immediately too (using whatever logs are already cached) so the UI is responsive.
+    this.renderRanked();
+  }
+
   async refresh(n = 60): Promise<void> {
     let rows: ResultRow[];
     try {
@@ -53,23 +74,47 @@ export class RankedGrid {
       })</div>`;
       return;
     }
-    this.render(rows);
+    this.rows = rows;
+    await this.ensureLogs();
+    this.renderRanked();
   }
 
-  private render(rows: ResultRow[]): void {
+  /** Fetch+cache logs for any loaded candidate we haven't fetched yet (one fetch per id, ever). */
+  private async ensureLogs(): Promise<void> {
+    const missing = this.rows.filter((r) => !this.logCache.has(r.configId));
+    await Promise.all(
+      missing.map((r) =>
+        fetchLog(r.configId)
+          .then((log) => {
+            this.logCache.set(r.configId, log);
+          })
+          // Non-fatal: a missing log just means this card uses its stored score for now.
+          .catch(() => {}),
+      ),
+    );
+  }
+
+  private renderRanked(): void {
+    const ranked = rerankCandidates(this.rows, this.logCache, this.profile);
+    this.render(ranked);
+  }
+
+  private render(ranked: RankedCandidate[]): void {
     this.list.innerHTML = "";
-    if (rows.length === 0) {
+    if (ranked.length === 0) {
       this.list.innerHTML = `<div class="empty">No results yet — run a sweep.</div>`;
       return;
     }
-    for (const row of rows) {
-      this.list.appendChild(this.card(row));
+    for (const c of ranked) {
+      this.list.appendChild(this.card(c));
     }
   }
 
-  private card(row: ResultRow): HTMLElement {
+  private card(c: RankedCandidate): HTMLElement {
+    const row = c.row;
     const card = document.createElement("div");
     card.className = "card";
+    if (!c.passed) card.classList.add("gate-failed");
     card.onclick = () => this.opts.onSelect(row);
 
     const top = document.createElement("div");
@@ -92,7 +137,8 @@ export class RankedGrid {
 
     const score = document.createElement("div");
     score.className = "score";
-    score.textContent = row.score.toFixed(3);
+    score.textContent = c.passed ? c.score.toFixed(3) : "gated";
+    if (!c.passed) score.classList.add("gated");
 
     top.append(swatches, score);
 
@@ -116,10 +162,18 @@ export class RankedGrid {
     spark.className = "sparkline";
     spark.width = 220;
     spark.height = 36;
-    // Lazily fetch the log and draw; failures are non-fatal (card still shows).
-    void fetchLog(row.configId)
-      .then((log) => drawSparkline(spark, log))
-      .catch(() => {});
+    // Draw from the cached log if we have it; else lazily fetch (and cache) it. Non-fatal on error.
+    const cached = this.logCache.get(row.configId);
+    if (cached) {
+      drawSparkline(spark, cached);
+    } else {
+      void fetchLog(row.configId)
+        .then((log) => {
+          this.logCache.set(row.configId, log);
+          drawSparkline(spark, log);
+        })
+        .catch(() => {});
+    }
 
     card.append(top, meta, spark);
     return card;

@@ -265,3 +265,47 @@ input[type="range"] {
 .frame-label {
   margin-left: auto;
 }
+.render-cmd {
+  margin-top: 6px;
+  font-size: 11px;
+}
+.render-cmd code {
+  display: block;
+  margin-top: 4px;
+  padding: 6px 8px;
+  background: #00000055;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  word-break: break-all;
+  white-space: pre-wrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* Score profile editor */
+.profile-editor {
+  margin-bottom: 10px;
+}
+.profile-field {
+  align-items: center;
+}
+.profile-field .weight-slider {
+  flex: 1;
+}
+.profile-field .weight-num {
+  width: 56px;
+}
+.gates {
+  margin-top: 6px;
+  border-top: 1px solid var(--line);
+  padding-top: 6px;
+}
+
+/* Gate-failed candidate cards (re-ranked to the bottom). */
+.card.gate-failed {
+  opacity: 0.5;
+}
+.card.gate-failed .score.gated {
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 11px;
+}
