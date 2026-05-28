@@ -159,7 +159,9 @@ async function handleApi(
       if (!cfg) {
         sendJson(res, 404, { error: "config not found", id });
       } else {
-        sendJson(res, 200, cfg);
+        // Backfill newer defaults (e.g. outroTicks) so the browser player can't hang on a
+        // config persisted by older code.
+        sendJson(res, 200, normalizeConfig(cfg));
       }
     } finally {
       store.close();
@@ -183,8 +185,9 @@ async function handleApi(
         sendJson(res, 404, { error: "config not found", id });
         return true;
       }
-      // Deterministic re-derivation: same seed+config -> identical log.
-      const { log } = runBattle(cfg);
+      // Normalize on read so configs persisted by older code (missing newer fields like
+      // outroTicks) get current defaults backfilled — guards against a NaN end-condition hang.
+      const { log } = runBattle(normalizeConfig(cfg));
       sendJson(res, 200, log);
     } finally {
       store.close();

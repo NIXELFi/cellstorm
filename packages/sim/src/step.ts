@@ -57,6 +57,8 @@ export function step(w: World, sink: EventSink): boolean {
     }
   }
 
-  // End once the victory beat has played out.
-  return w.resolvedFrame >= 0 && w.frame >= w.resolvedFrame + w.cfg.outroTicks;
+  // End once the victory beat has played out. Guard outroTicks against a non-finite value so a
+  // malformed/legacy config can never produce a NaN comparison that loops forever.
+  const outro = Number.isFinite(w.cfg.outroTicks) ? w.cfg.outroTicks : 0;
+  return w.resolvedFrame >= 0 && w.frame >= w.resolvedFrame + outro;
 }
