@@ -63,6 +63,17 @@ export function fetchPowers(): Promise<string[]> {
 export function fetchDbPath(): Promise<{ dbPath: string }> {
   return getJson<{ dbPath: string }>("/api/dbpath");
 }
+export function fetchLatestBatch(): Promise<{ batchId: string | null }> {
+  return getJson<{ batchId: string | null }>("/api/latest-batch");
+}
+export async function setVideoMade(configId: string, made: boolean): Promise<void> {
+  const res = await fetch(`/api/results/${encodeURIComponent(configId)}/video-made`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ made }),
+  });
+  if (!res.ok) throw new Error(`POST video-made -> ${res.status}`);
+}
 export function fetchProgress(batchId: string): Promise<SweepProgress> {
   return getJson<SweepProgress>(progressUrl(batchId));
 }

@@ -3,7 +3,7 @@
 // into the player; starting a sweep scopes the grid to the new batch and auto-refreshes.
 
 import "./styles.css";
-import { fetchConfig } from "./api";
+import { fetchConfig, fetchLatestBatch } from "./api";
 import { SweepBuilder } from "./ui/sweepBuilder";
 import { RankedGrid } from "./ui/rankedGrid";
 import { ProfileEditor } from "./ui/profileEditor";
@@ -40,11 +40,11 @@ const profileEditor = new ProfileEditor({
 grid.setProfile(profileEditor.getProfile());
 
 const builder = new SweepBuilder({
-  onBatch: () => {
-    // Keep the grid showing the whole catalog (not scoped to the new batch): a sweep that
-    // resume-skips already-computed configs adds nothing to its own batch, but the catalog
-    // still holds results worth seeing, and new high-scorers float up by score as they land.
-    grid.setBatch(undefined);
+  onBatch: (batchId) => {
+    // Focus the grid on the new sweep so its top candidates surface as they land; the All-time
+    // view remains one click away.
+    grid.setLatestBatch(batchId);
+    grid.showLatest();
     let n = 0;
     const t = window.setInterval(() => {
       void grid.refresh();
@@ -56,7 +56,7 @@ const builder = new SweepBuilder({
 // Layout
 const left = document.createElement("div");
 left.className = "col col-left";
-left.append(builder.el, profileEditor.el, grid.el);
+left.append(builder.el, grid.el);
 
 const center = document.createElement("div");
 center.className = "col col-center";
@@ -64,9 +64,15 @@ center.append(player.el);
 
 const right = document.createElement("div");
 right.className = "col col-right";
-right.append(hudEditor.el, tuning.el);
+right.append(hudEditor.el, tuning.el, profileEditor.el);
 
 root.append(left, center, right);
 
-// Initial load of any existing results.
+// Initial load: show the all-time catalog immediately, and enable the "Latest sweep" tab if the
+// store already has a most-recent batch from a prior session.
 void grid.refresh();
+void fetchLatestBatch()
+  .then(({ batchId }) => {
+    if (batchId) grid.setLatestBatch(batchId);
+  })
+  .catch(() => {});

@@ -12,6 +12,8 @@ export interface ResultRow {
   winner: number;
   durationTicks: number;
   batchId: string;
+  /** Whether a video has been produced for this candidate (user-set, persisted). */
+  videoMade?: boolean;
 }
 
 interface RawRow {
@@ -22,6 +24,7 @@ interface RawRow {
   winner: number;
   durationTicks: number;
   batchId: string;
+  videoMade: number;
 }
 
 // Re-export the single source of truth (defined in the node-dep-free configId.ts so the harness
@@ -43,10 +46,16 @@ export class Store {
         breakdown TEXT,
         winner INTEGER,
         durationTicks INTEGER,
-        batchId TEXT
+        batchId TEXT,
+        videoMade INTEGER DEFAULT 0
       );
       CREATE INDEX IF NOT EXISTS idx_results_score ON results (score DESC);
     `);
+    // Migrate DBs created before videoMade existed.
+    const cols = this.db.prepare(`PRAGMA table_info(results)`).all() as { name: string }[];
+    if (!cols.some((c) => c.name === "videoMade")) {
+      this.db.exec(`ALTER TABLE results ADD COLUMN videoMade INTEGER DEFAULT 0`);
+    }
     this.logsDir = `${dbPath}-logs`;
   }
 
@@ -59,6 +68,7 @@ export class Store {
       winner: r.winner,
       durationTicks: r.durationTicks,
       batchId: r.batchId,
+      videoMade: r.videoMade ? 1 : 0,
     };
   }
 
@@ -71,6 +81,7 @@ export class Store {
       winner: r.winner,
       durationTicks: r.durationTicks,
       batchId: r.batchId,
+      videoMade: !!r.videoMade,
     };
   }
 
@@ -86,8 +97,8 @@ export class Store {
       // resume is idempotent and a config is only ever stored once. The latest batch wins.
       this._insertStmt = this.db.prepare(
         `INSERT OR REPLACE INTO results
-         (configId, config, score, breakdown, winner, durationTicks, batchId)
-         VALUES (@configId, @config, @score, @breakdown, @winner, @durationTicks, @batchId)`,
+         (configId, config, score, breakdown, winner, durationTicks, batchId, videoMade)
+         VALUES (@configId, @config, @score, @breakdown, @winner, @durationTicks, @batchId, @videoMade)`,
       );
     }
     return this._insertStmt;
@@ -113,6 +124,19 @@ export class Store {
   count(): number {
     const r = this.db.prepare(`SELECT COUNT(*) AS c FROM results`).get() as { c: number };
     return r.c;
+  }
+
+  /** Mark whether a video has been produced for a candidate (persisted). */
+  setVideoMade(configId: string, made: boolean): void {
+    this.db.prepare(`UPDATE results SET videoMade = ? WHERE configId = ?`).run(made ? 1 : 0, configId);
+  }
+
+  /** The most recently written batch id (highest rowid), or null if the catalog is empty. */
+  latestBatch(): string | null {
+    const r = this.db.prepare(`SELECT batchId FROM results ORDER BY rowid DESC LIMIT 1`).get() as
+      | { batchId: string }
+      | undefined;
+    return r ? r.batchId : null;
   }
 
   has(configId: string): boolean {

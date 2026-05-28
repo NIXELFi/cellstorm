@@ -1,16 +1,14 @@
-// Ranked candidate grid: fetches /api/results and renders a card per battle (team color swatches
-// + power names, score, winner badge). It supports LIVE re-ranking under an edited ScoreProfile:
-// when the profile changes, each loaded candidate's cached log is re-scored client-side via
-// score(log, profile) and the grid re-sorts by the new score — NO re-simulation, NO sweep. Logs
-// are fetched once via GET /api/log/:id and cached in the browser, so subsequent weight tweaks are
-// instant. Gate failures (passed=false) sort to the bottom and are visually marked. The pure
-// re-rank math lives in rerankLogic; this file is DOM wiring + the browser log cache.
+// Ranked candidate grid. Two views: ALL-TIME (whole catalog, loads immediately on open) and
+// LATEST SWEEP (most recent batch). Cards render instantly by their stored score; each candidate's
+// cached log is then fetched in the BACKGROUND to (a) re-rank live under an edited ScoreProfile via
+// score(log, profile) — no re-sim — and (b) draw its sparkline. Each card has a persistent
+// "video made" toggle (POST /api/results/:id/video-made). Re-rank math lives in rerankLogic.
 
 import type { ResultRow } from "@cellstorm/cli";
 import type { BattleLog } from "@cellstorm/sim";
 import { DEFAULT_PROFILE, type ScoreProfile } from "@cellstorm/score";
 import { THEME, teamColor, teamName } from "@cellstorm/render";
-import { fetchResults, fetchLog } from "../api";
+import { fetchResults, fetchLog, setVideoMade } from "../api";
 import { drawSparkline } from "./sparkline";
 import { rerankCandidates, type RankedCandidate } from "./rerankLogic";
 
@@ -22,11 +20,17 @@ export interface RankedGridOptions {
   onSelect: (row: ResultRow) => void;
 }
 
+type View = "all" | "latest";
+
 export class RankedGrid {
   readonly el: HTMLElement;
   private readonly list: HTMLElement;
   private readonly opts: RankedGridOptions;
-  private currentBatch?: string;
+  private readonly tabAll: HTMLButtonElement;
+  private readonly tabLatest: HTMLButtonElement;
+
+  private view: View = "all";
+  private latestBatch?: string;
 
   // State for live re-ranking.
   private rows: ResultRow[] = [];
@@ -38,45 +42,67 @@ export class RankedGrid {
     this.opts = opts;
     this.el = document.createElement("div");
     this.el.className = "ranked-grid";
+
     const header = document.createElement("div");
     header.className = "panel-header";
-    header.textContent = "Ranked candidates";
+    const title = document.createElement("span");
+    title.textContent = "Ranked candidates";
+    const tabs = document.createElement("div");
+    tabs.className = "tabs";
+    this.tabAll = this.tab("All-time", "all");
+    this.tabLatest = this.tab("Latest sweep", "latest");
+    tabs.append(this.tabAll, this.tabLatest);
     const refresh = document.createElement("button");
     refresh.className = "btn small";
-    refresh.textContent = "Refresh";
+    refresh.textContent = "↻";
+    refresh.title = "Refresh";
     refresh.onclick = () => void this.refresh();
-    header.appendChild(refresh);
+    header.append(title, tabs, refresh);
+
     this.list = document.createElement("div");
     this.list.className = "card-list";
     this.el.append(header, this.list);
+    this.syncTabs();
   }
 
-  setBatch(batch: string | undefined): void {
-    this.currentBatch = batch;
+  /** Tell the grid which batch is the most recent (enables/targets the "Latest sweep" tab). */
+  setLatestBatch(batchId: string): void {
+    this.latestBatch = batchId;
+    this.tabLatest.disabled = false;
+    if (this.view === "latest") void this.refresh();
+  }
+
+  /** Switch to the latest-sweep view (used right after starting a sweep). */
+  showLatest(): void {
+    if (!this.latestBatch) return;
+    this.view = "latest";
+    this.syncTabs();
+    void this.refresh();
   }
 
   /** Set the active ScoreProfile and re-rank the loaded candidates over their cached logs. */
   setProfile(profile: ScoreProfile): void {
     this.profile = profile;
-    // Ensure logs for the loaded candidates are fetched+cached, then re-render in new order.
+    this.renderRanked(); // immediate (cached logs / stored-score fallback)
     void this.ensureLogs().then(() => this.renderRanked());
-    // Render immediately too (using whatever logs are already cached) so the UI is responsive.
-    this.renderRanked();
   }
 
   async refresh(n = 60): Promise<void> {
+    const batch = this.view === "latest" ? this.latestBatch : undefined;
     let rows: ResultRow[];
     try {
-      rows = await fetchResults(n, this.currentBatch);
+      rows = await fetchResults(n, batch);
     } catch (err) {
-      this.list.innerHTML = `<div class="empty">No results yet (${
+      this.list.innerHTML = `<div class="empty">Couldn't load results (${
         err instanceof Error ? err.message : String(err)
       })</div>`;
       return;
     }
     this.rows = rows;
-    await this.ensureLogs();
+    // Render immediately by stored score so the catalog shows the instant the UI opens; logs
+    // (for live re-ranking + sparklines) stream in afterward and trigger a re-rank.
     this.renderRanked();
+    void this.ensureLogs().then(() => this.renderRanked());
   }
 
   /** Fetch+cache logs for any loaded candidate we haven't fetched yet (one fetch per id, ever). */
@@ -88,26 +114,44 @@ export class RankedGrid {
           .then((log) => {
             this.logCache.set(r.configId, log);
           })
-          // Non-fatal: a missing log just means this card uses its stored score for now.
           .catch(() => {}),
       ),
     );
   }
 
   private renderRanked(): void {
-    const ranked = rerankCandidates(this.rows, this.logCache, this.profile);
-    this.render(ranked);
+    this.render(rerankCandidates(this.rows, this.logCache, this.profile));
   }
 
   private render(ranked: RankedCandidate[]): void {
     this.list.innerHTML = "";
     if (ranked.length === 0) {
-      this.list.innerHTML = `<div class="empty">No results yet — run a sweep.</div>`;
+      this.list.innerHTML =
+        this.view === "latest"
+          ? `<div class="empty">No results for the latest sweep yet.</div>`
+          : `<div class="empty">No results yet — run a sweep.</div>`;
       return;
     }
-    for (const c of ranked) {
-      this.list.appendChild(this.card(c));
-    }
+    for (const c of ranked) this.list.appendChild(this.card(c));
+  }
+
+  private tab(label: string, view: View): HTMLButtonElement {
+    const b = document.createElement("button");
+    b.className = "tab";
+    b.textContent = label;
+    b.onclick = () => {
+      if (this.view === view) return;
+      this.view = view;
+      this.syncTabs();
+      void this.refresh();
+    };
+    return b;
+  }
+
+  private syncTabs(): void {
+    this.tabAll.classList.toggle("active", this.view === "all");
+    this.tabLatest.classList.toggle("active", this.view === "latest");
+    this.tabLatest.disabled = !this.latestBatch;
   }
 
   private card(c: RankedCandidate): HTMLElement {
@@ -115,11 +159,11 @@ export class RankedGrid {
     const card = document.createElement("div");
     card.className = "card";
     if (!c.passed) card.classList.add("gate-failed");
+    if (row.videoMade) card.classList.add("video-made");
     card.onclick = () => this.opts.onSelect(row);
 
     const top = document.createElement("div");
     top.className = "card-top";
-
     const swatches = document.createElement("div");
     swatches.className = "swatches";
     row.config.powers.forEach((power, team) => {
@@ -134,12 +178,10 @@ export class RankedGrid {
       chip.append(dot, label);
       swatches.appendChild(chip);
     });
-
     const score = document.createElement("div");
     score.className = "score";
     score.textContent = c.passed ? c.score.toFixed(3) : "gated";
     if (!c.passed) score.classList.add("gated");
-
     top.append(swatches, score);
 
     const meta = document.createElement("div");
@@ -155,17 +197,36 @@ export class RankedGrid {
     }
     const seed = document.createElement("span");
     seed.className = "muted";
-    // Video length = fight duration + the victory-beat outro, in seconds @ 60fps.
     const outro = row.config.outroTicks ?? 0;
     const videoSec = (row.durationTicks + outro) / 60;
     seed.textContent = `seed ${row.config.seed} · ${videoSec.toFixed(1)}s`;
-    meta.append(winner, seed);
+    // Video-made toggle — persisted; click doesn't open the player.
+    const made = document.createElement("button");
+    made.className = "made-toggle";
+    const paint = () => {
+      made.classList.toggle("on", !!row.videoMade);
+      made.textContent = row.videoMade ? "✓ video made" : "mark made";
+    };
+    paint();
+    made.onclick = (e) => {
+      e.stopPropagation();
+      const next = !row.videoMade;
+      row.videoMade = next;
+      card.classList.toggle("video-made", next);
+      paint();
+      void setVideoMade(row.configId, next).catch(() => {
+        // revert on failure
+        row.videoMade = !next;
+        card.classList.toggle("video-made", !next);
+        paint();
+      });
+    };
+    meta.append(winner, seed, made);
 
     const spark = document.createElement("canvas");
     spark.className = "sparkline";
     spark.width = 220;
     spark.height = 36;
-    // Draw from the cached log if we have it; else lazily fetch (and cache) it. Non-fatal on error.
     const cached = this.logCache.get(row.configId);
     if (cached) {
       drawSparkline(spark, cached);

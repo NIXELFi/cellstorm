@@ -149,6 +149,38 @@ async function handleApi(
     return true;
   }
 
+  // GET /api/latest-batch — the most recently written batch id (for the "Latest sweep" view).
+  if (method === "GET" && path === "/api/latest-batch") {
+    const store = new Store(DB_PATH);
+    try {
+      sendJson(res, 200, { batchId: store.latestBatch() });
+    } finally {
+      store.close();
+    }
+    return true;
+  }
+
+  // POST /api/results/:id/video-made  body: { made: boolean } — persist the video-made flag.
+  const vmMatch = /^\/api\/results\/(.+)\/video-made$/.exec(path);
+  if (method === "POST" && vmMatch) {
+    const id = decodeURIComponent(vmMatch[1]!);
+    let made = true;
+    try {
+      const body = JSON.parse((await readBody(req)) || "{}") as { made?: boolean };
+      made = body.made !== false;
+    } catch {
+      /* default to true */
+    }
+    const store = new Store(DB_PATH);
+    try {
+      store.setVideoMade(id, made);
+      sendJson(res, 200, { ok: true, configId: id, made });
+    } finally {
+      store.close();
+    }
+    return true;
+  }
+
   // GET /api/config/:id
   const cfgMatch = /^\/api\/config\/(.+)$/.exec(path);
   if (method === "GET" && cfgMatch) {
