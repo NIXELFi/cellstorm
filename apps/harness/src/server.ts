@@ -205,6 +205,10 @@ async function handleApi(
   const logMatch = /^\/api\/log\/(.+)$/.exec(path);
   if (method === "GET" && logMatch) {
     const id = decodeURIComponent(logMatch[1]!);
+    // cachedOnly: return the cached log if present, else 404 immediately — NEVER re-derive.
+    // The ranked grid uses this so loading/switching views can't block the single-threaded bridge
+    // on dozens of synchronous runBattle() re-derivations (which froze the whole UI).
+    const cachedOnly = url.searchParams.get("cachedOnly") === "1";
     const store = new Store(DB_PATH);
     try {
       const cached = store.getLog(id);
@@ -212,13 +216,17 @@ async function handleApi(
         sendJson(res, 200, cached);
         return true;
       }
+      if (cachedOnly) {
+        sendJson(res, 404, { error: "log not cached", id });
+        return true;
+      }
       const cfg = store.getConfig(id);
       if (!cfg) {
         sendJson(res, 404, { error: "config not found", id });
         return true;
       }
-      // Normalize on read so configs persisted by older code (missing newer fields like
-      // outroTicks) get current defaults backfilled — guards against a NaN end-condition hang.
+      // On-demand re-derivation (used by the player's jump-to-climax, one config at a time).
+      // Normalize on read so older configs (missing newer fields like outroTicks) get defaults.
       const { log } = runBattle(normalizeConfig(cfg));
       sendJson(res, 200, log);
     } finally {

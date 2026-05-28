@@ -8,7 +8,7 @@ import type { ResultRow } from "@cellstorm/cli";
 import type { BattleLog } from "@cellstorm/sim";
 import { DEFAULT_PROFILE, type ScoreProfile } from "@cellstorm/score";
 import { THEME, teamColor, teamName } from "@cellstorm/render";
-import { fetchResults, fetchLog, setVideoMade } from "../api";
+import { fetchResults, fetchLogCached, setVideoMade } from "../api";
 import { drawSparkline } from "./sparkline";
 import { rerankCandidates, type RankedCandidate } from "./rerankLogic";
 
@@ -110,7 +110,7 @@ export class RankedGrid {
     const missing = this.rows.filter((r) => !this.logCache.has(r.configId));
     await Promise.all(
       missing.map((r) =>
-        fetchLog(r.configId)
+        fetchLogCached(r.configId)
           .then((log) => {
             this.logCache.set(r.configId, log);
           })
@@ -231,7 +231,7 @@ export class RankedGrid {
     if (cached) {
       drawSparkline(spark, cached);
     } else {
-      void fetchLog(row.configId)
+      void fetchLogCached(row.configId)
         .then((log) => {
           this.logCache.set(row.configId, log);
           drawSparkline(spark, log);

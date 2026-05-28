@@ -35,6 +35,8 @@ export class CssHud {
   private config: HudConfig;
 
   private side!: HTMLElement;
+  private scrim!: HTMLElement;
+  private labelsEl!: HTMLElement;
   private rows: TeamRow[] = [];
   private intro!: HTMLElement;
   private winnerEl!: HTMLElement;
@@ -80,6 +82,7 @@ export class CssHud {
       row.label.classList.toggle("dead", dead);
       row.label.classList.toggle("lead", !dead && t === lead && winner < 0);
     }
+    this.fitLabels();
 
     // Intro fade (tick-driven). The side scoreboard fades IN as the intro fades out, so the two
     // don't clash on screen at the start.
@@ -87,6 +90,7 @@ export class CssHud {
     this.intro.style.opacity = String(ia);
     this.intro.style.display = ia <= 0.001 ? "none" : "flex";
     this.side.style.opacity = String(1 - ia);
+    this.scrim.style.opacity = String(1 - ia);
 
     // Winner reveal (tick-driven pop-in). Reset if we scrub back before resolution.
     if (winner < 0) {
@@ -108,6 +112,18 @@ export class CssHud {
     }
   }
 
+  /** Scale the label row to fit the strip width so it stays on ONE centered line at any team
+   *  count (2 -> 10+). Names/digit-widths vary, so we measure and scale rather than guess. */
+  private fitLabels(): void {
+    const labels = this.labelsEl;
+    labels.style.transform = "none";
+    const avail = this.side.clientWidth;
+    const natural = labels.offsetWidth; // true content width (width: max-content)
+    if (avail > 0 && natural > avail) {
+      labels.style.transform = `scale(${(avail / natural).toFixed(4)})`;
+    }
+  }
+
   destroy(): void {
     this.root.innerHTML = "";
   }
@@ -118,11 +134,16 @@ export class CssHud {
     this.root.classList.add("cs-hud");
     this.root.innerHTML = "";
 
+    // Darkening + blur scrim behind the top strip so the labels stay readable over the battle;
+    // gradients/fades down into the action.
+    this.scrim = el("div", "cs-topscrim");
+
     // Side display (top): a slim proportional strip — each team a segment sized by its share of
     // living cells (shrinks as it dies) — plus a tiny name+count label row. Minimal, out of the way.
     this.side = el("div", "cs-side");
     const pbar = el("div", "cs-pbar");
     const labels = el("div", "cs-labels");
+    this.labelsEl = labels;
     this.powers.forEach((power, t) => {
       const color = this.teamColor(t);
       const seg = el("div", "cs-seg");
@@ -181,7 +202,8 @@ export class CssHud {
     this.winnerEl.appendChild(wcard);
     this.winnerEl.style.display = "none";
 
-    this.root.append(this.side, this.intro, this.winnerEl);
+    // Scrim first so it sits behind the strip.
+    this.root.append(this.scrim, this.side, this.intro, this.winnerEl);
   }
 
   private fillWinner(winner: number, survivors: number): void {
@@ -244,26 +266,39 @@ const CSS = `
   container-type: size;
 }
 /* sizes scale with the canvas via cqh (container query height) so it works at preview AND 4K */
+.cs-topscrim {
+  position: absolute; top: 0; left: 0; right: 0; height: 13cqh;
+  background: linear-gradient(to bottom,
+    rgba(5,3,10,0.82) 0%, rgba(5,3,10,0.6) 45%, rgba(5,3,10,0.25) 75%, transparent 100%);
+  -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px);
+  /* fade the blur out at the bottom so there's no hard edge */
+  -webkit-mask-image: linear-gradient(to bottom, #000 55%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 55%, transparent 100%);
+}
 .cs-side {
   position: absolute; top: 1.8cqh; left: 2cqh; right: 2cqh;
-  display: flex; flex-direction: column; gap: 0.9cqh;
+  display: flex; flex-direction: column; align-items: center; gap: 0.9cqh;
 }
 .cs-pbar {
-  display: flex; gap: 0.45cqh; height: 1.25cqh;
+  display: flex; gap: 0.45cqh; height: 1.25cqh; width: 100%;
 }
 .cs-seg {
   background: var(--c); border-radius: 1cqh; min-width: 0;
   box-shadow: 0 0 0.8cqh color-mix(in srgb, var(--c) 55%, transparent);
 }
-.cs-seg:not(.dead) { min-width: 1.4cqw; }
+.cs-seg:not(.dead) { min-width: 1.2cqw; }
 .cs-seg.dead { opacity: 0; }
-.cs-labels { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.4cqh 1.6cqh; }
-.cs-lab { display: flex; align-items: baseline; gap: 0.5cqh; }
-.cs-lab-dot { width: 0.95cqh; height: 0.95cqh; border-radius: 50%; background: var(--c);
-  align-self: center; box-shadow: 0 0 0.7cqh var(--c); }
-.cs-lab-name { font-weight: 700; font-size: 1.4cqh; letter-spacing: 0.05em; text-transform: uppercase;
-  color: var(--c); text-shadow: 0 0 0.7cqh color-mix(in srgb, var(--c) 40%, transparent); }
-.cs-lab-count { font-family: var(--display); font-size: 1.95cqh; color: #fff; font-variant-numeric: tabular-nums; }
+/* labels: ONE line, sized to content (max-content), centered, then scaled to fit (see fitLabels). */
+.cs-labels { display: flex; flex-wrap: nowrap; align-items: baseline;
+  width: max-content; max-width: none;
+  gap: 2.4cqw; white-space: nowrap; transform-origin: center top; will-change: transform; }
+.cs-lab { display: flex; align-items: baseline; gap: 0.8cqw; }
+.cs-lab-dot { width: 1.7cqw; height: 1.7cqw; border-radius: 50%;
+  background: var(--c); align-self: center; box-shadow: 0 0 0.7cqh var(--c); }
+.cs-lab-name { font-weight: 700; font-size: 2.4cqw; letter-spacing: 0.04em;
+  text-transform: uppercase; color: var(--c); text-shadow: 0 0.15cqh 0.6cqh rgba(0,0,0,0.7); }
+.cs-lab-count { font-family: var(--display); font-size: 3.3cqw; color: #fff;
+  font-variant-numeric: tabular-nums; text-shadow: 0 0.15cqh 0.6cqh rgba(0,0,0,0.8); }
 .cs-lab.dead { opacity: 0.32; }
 .cs-lab.dead .cs-lab-name { text-decoration: line-through; }
 .cs-lab.lead .cs-lab-dot { box-shadow: 0 0 1.6cqh var(--c); }
@@ -294,7 +329,10 @@ const CSS = `
 
 .cs-winner {
   position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-  background: radial-gradient(120% 90% at 50% 50%, color-mix(in srgb, var(--c) 14%, rgba(5,2,10,0.55)) 0%, rgba(5,2,10,0.92) 72%);
+  /* same darkening + blur treatment as the top scrim, as a full-screen vignette */
+  background: radial-gradient(125% 95% at 50% 50%,
+    color-mix(in srgb, var(--c) 16%, rgba(5,2,10,0.7)) 0%, rgba(5,2,10,0.86) 55%, rgba(5,2,10,0.95) 100%);
+  -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
 }
 .cs-winner-card { display: flex; flex-direction: column; align-items: center; gap: 1cqh;
   transform-origin: center; will-change: transform, opacity; }

@@ -57,6 +57,11 @@ export function fetchConfig(id: string): Promise<BattleConfig> {
 export function fetchLog(id: string): Promise<BattleLog> {
   return getJson<BattleLog>(logUrl(id));
 }
+/** Cached-only log fetch: resolves only if the bridge already has the log on disk; rejects (404)
+ * otherwise WITHOUT re-deriving. The grid uses this so loading never blocks the bridge. */
+export function fetchLogCached(id: string): Promise<BattleLog> {
+  return getJson<BattleLog>(`${logUrl(id)}?cachedOnly=1`);
+}
 export function fetchPowers(): Promise<string[]> {
   return getJson<string[]>("/api/powers");
 }
