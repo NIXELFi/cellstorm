@@ -60,6 +60,9 @@ export function fetchLog(id: string): Promise<BattleLog> {
 export function fetchPowers(): Promise<string[]> {
   return getJson<string[]>("/api/powers");
 }
+export function fetchDbPath(): Promise<{ dbPath: string }> {
+  return getJson<{ dbPath: string }>("/api/dbpath");
+}
 export function fetchProgress(batchId: string): Promise<SweepProgress> {
   return getJson<SweepProgress>(progressUrl(batchId));
 }

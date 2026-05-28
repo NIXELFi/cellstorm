@@ -7,8 +7,10 @@ import { Application } from "pixi.js";
 import { BattlePlayer, type HudConfig, type Theme } from "@cellstorm/render";
 import { DEFAULT_HUD } from "@cellstorm/render";
 import type { BattleConfig } from "@cellstorm/sim";
-import { fetchLog } from "../api";
+import { configIdOf } from "@cellstorm/cli/config-id";
+import { fetchLog, fetchDbPath } from "../api";
 import { climaxTick } from "./logLogic";
+import { buildRenderCommand } from "./renderCommand";
 
 const PREVIEW_SCALE = 1.5; // 280x498 logical -> 420x747 canvas (crisp but light)
 
@@ -29,6 +31,7 @@ export class PlayerPanel {
   private rafId?: number;
   private scrub!: HTMLInputElement;
   private frameLabel!: HTMLElement;
+  private renderCmd!: HTMLElement;
   private onPlayerReady?: (h: PlayerPanelHandle) => void;
 
   constructor() {
@@ -147,6 +150,12 @@ export class PlayerPanel {
     climax.textContent = "Jump to climax";
     climax.onclick = () => void this.jumpToClimax();
 
+    const sendRender = document.createElement("button");
+    sendRender.className = "btn";
+    sendRender.textContent = "Send to render";
+    sendRender.title = "Copy the renderer CLI command for this config + current HUD";
+    sendRender.onclick = () => void this.sendToRender();
+
     const speedSel = document.createElement("select");
     for (const s of [0.25, 0.5, 1, 2, 4]) {
       const opt = document.createElement("option");
@@ -176,17 +185,55 @@ export class PlayerPanel {
 
     const row1 = document.createElement("div");
     row1.className = "inline";
-    row1.append(playPause, stepBtn, climax, speedSel, this.frameLabel);
+    row1.append(playPause, stepBtn, climax, sendRender, speedSel, this.frameLabel);
     const row2 = document.createElement("div");
     row2.className = "inline scrub-row";
     row2.appendChild(this.scrub);
-    this.controls.append(row1, row2);
+
+    this.renderCmd = document.createElement("div");
+    this.renderCmd.className = "render-cmd";
+    this.renderCmd.hidden = true;
+
+    this.controls.append(row1, row2, this.renderCmd);
+  }
+
+  /** Build the renderer CLI command for the current config + HUD, copy it to the clipboard, and
+   * display it. The harness can't spawn Playwright in-browser, so this completes the loop by
+   * handing the user the exact working invocation. */
+  private async sendToRender(): Promise<void> {
+    if (!this.config) return;
+    let dbPath = "<dbpath>";
+    try {
+      dbPath = (await fetchDbPath()).dbPath;
+    } catch {
+      /* fall back to a placeholder if the bridge isn't reachable */
+    }
+    const cmd = buildRenderCommand({
+      configId: configIdOf(this.config),
+      dbPath,
+      hud: this.hud,
+    });
+    let copied = false;
+    try {
+      await navigator.clipboard?.writeText(cmd);
+      copied = true;
+    } catch {
+      /* clipboard may be unavailable (insecure context); the command is still shown below */
+    }
+    this.renderCmd.hidden = false;
+    this.renderCmd.innerHTML = "";
+    const note = document.createElement("div");
+    note.className = "muted";
+    note.textContent = copied ? "Render command copied to clipboard:" : "Render command:";
+    const code = document.createElement("code");
+    code.textContent = cmd;
+    this.renderCmd.append(note, code);
   }
 
   private async jumpToClimax(): Promise<void> {
     if (!this.player || !this.config) return;
     try {
-      const id = `${this.config.teamCount}:${this.config.powers.join(",")}:${this.config.seed}`;
+      const id = configIdOf(this.config);
       const log = await fetchLog(id);
       const tick = climaxTick(log);
       this.player.pause();

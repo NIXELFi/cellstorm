@@ -131,6 +131,13 @@ async function handleApi(
     return true;
   }
 
+  // GET /api/dbpath — the absolute db path this bridge is using, so the harness can build the
+  // exact `render` CLI invocation for "Send to render".
+  if (method === "GET" && path === "/api/dbpath") {
+    sendJson(res, 200, { dbPath: DB_PATH });
+    return true;
+  }
+
   // GET /api/config/:id
   const cfgMatch = /^\/api\/config\/(.+)$/.exec(path);
   if (method === "GET" && cfgMatch) {
