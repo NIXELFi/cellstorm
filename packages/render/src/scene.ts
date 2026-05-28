@@ -90,9 +90,10 @@ export class PixiScene {
         any = true;
       }
       if (any) {
+        // Subtle outline — just enough to separate cells in a blob, not a heavy edge.
         this.cellLayer
           .fill({ color: this.teamColor(t), alpha: 1 })
-          .stroke({ width: Math.max(0.6, 0.9 * s), color: this.darken(this.teamColor(t), 0.4), alpha: 0.95 });
+          .stroke({ width: Math.max(0.4, 0.55 * s), color: this.darken(this.teamColor(t), 0.55), alpha: 0.5 });
       }
     }
 
@@ -165,8 +166,8 @@ export class PixiScene {
   }
 
   private cellR(c: { radius: number; hp: number; maxHp: number }): number {
-    // ~35% larger than the prototype so the bolder shapes actually read at small sizes.
-    return c.radius * (0.7 + 0.45 * (c.hp / c.maxHp)) * 1.35;
+    // A touch larger than the prototype so shapes read, without dominating.
+    return c.radius * (0.62 + 0.45 * (c.hp / c.maxHp)) * 1.15;
   }
 
   /** Darken a hex color toward black by factor f (0..1) — used for crisp cell outlines. */
