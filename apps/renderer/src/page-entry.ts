@@ -32,7 +32,7 @@ declare global {
   interface Window {
     __cellstorm: {
       init(args: InitArgs): Promise<void>;
-      drawFrame(index: number): void;
+      drawFrame(index: number, hudHidden?: boolean, resetCosmetic?: boolean): void;
       frameCount(): number;
       ready(): boolean;
     };
@@ -69,11 +69,11 @@ window.__cellstorm = {
     app.render();
   },
 
-  drawFrame(index: number): void {
+  drawFrame(index: number, hudHidden = false, resetCosmetic = false): void {
     if (!player || !app) throw new Error("not initialized");
     const f = frames[index];
     if (!f) return;
-    player.renderSnapshot(f, eventsByFrame[index] ?? []);
+    player.renderSnapshot(f, eventsByFrame[index] ?? [], { hudHidden, resetCosmetic });
     app.render();
   },
 

@@ -2,6 +2,20 @@
 // unit-tested without spawning anything; encode() spawns the system ffmpeg with those args.
 
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
+import ffmpegStatic from "ffmpeg-static";
+
+/**
+ * Resolve the ffmpeg binary. An explicit path wins; otherwise prefer the bundled `ffmpeg-static`
+ * binary (a real ffmpeg shipped per-platform via npm — no system install or PATH setup, so renders
+ * work out of the box on macOS AND Windows); fall back to a system `ffmpeg` on PATH if for some
+ * reason the static binary isn't present.
+ */
+export function resolveFfmpegBin(explicit?: string): string {
+  if (explicit) return explicit;
+  if (ffmpegStatic && existsSync(ffmpegStatic)) return ffmpegStatic;
+  return "ffmpeg";
+}
 
 /**
  * Build the ffmpeg argv to encode a PNG frame sequence into an H.264 MP4.
@@ -9,10 +23,23 @@ import { spawn } from "node:child_process";
  * Frames are read as `<framesDir>/%06d.png` at `fps` and written to `outPath`. yuv420p keeps the
  * output broadly playable (QuickTime / browsers / YouTube). When `audioPath` is given it's added as
  * a second input and encoded to AAC; `-shortest` trims the (slightly longer) audio to the video.
+ *
+ * `audioOffsetSec` delays the audio by that many seconds via `-itsoffset` — used so the soundtrack
+ * (scored from the battle) starts at the cut to t=0, after the silent flash-forward teaser, keeping
+ * audio and battle visuals in sync. The teaser plays clean (silent).
  */
-export function ffmpegArgs(framesDir: string, fps: number, outPath: string, audioPath?: string): string[] {
+export function ffmpegArgs(
+  framesDir: string,
+  fps: number,
+  outPath: string,
+  audioPath?: string,
+  audioOffsetSec = 0,
+): string[] {
   const args = ["-y", "-framerate", String(fps), "-i", `${framesDir}/%06d.png`];
-  if (audioPath) args.push("-i", audioPath);
+  if (audioPath) {
+    if (audioOffsetSec > 0) args.push("-itsoffset", String(audioOffsetSec));
+    args.push("-i", audioPath);
+  }
   args.push("-c:v", "libx264", "-pix_fmt", "yuv420p");
   if (audioPath) args.push("-c:a", "aac", "-b:a", "192k", "-shortest");
   args.push(outPath);
@@ -26,6 +53,8 @@ export interface EncodeOptions {
   ffmpegPath?: string;
   /** Optional audio track (WAV) to mux into the MP4. */
   audioPath?: string;
+  /** Delay the audio by this many seconds (the flash-forward teaser length) so it starts at t=0. */
+  audioOffsetSec?: number;
   /** Forward ffmpeg stderr to this stream (default process.stderr). Pass null to silence. */
   log?: NodeJS.WritableStream | null;
 }
@@ -36,8 +65,8 @@ export interface EncodeOptions {
  */
 export function encode(opts: EncodeOptions): Promise<void> {
   const fps = opts.fps ?? 60;
-  const bin = opts.ffmpegPath ?? "ffmpeg";
-  const args = ffmpegArgs(opts.framesDir, fps, opts.outPath, opts.audioPath);
+  const bin = resolveFfmpegBin(opts.ffmpegPath);
+  const args = ffmpegArgs(opts.framesDir, fps, opts.outPath, opts.audioPath, opts.audioOffsetSec ?? 0);
   const log = opts.log === undefined ? process.stderr : opts.log;
 
   return new Promise<void>((resolve, reject) => {

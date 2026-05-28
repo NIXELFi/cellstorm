@@ -17,9 +17,12 @@ import {
   createReadStream,
 } from "node:fs";
 import { dirname, join, resolve, extname, normalize } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { Store, type SweepSpec } from "@cellstorm/cli";
+import { revealCommands } from "./revealCommands";
+import { initialRenderProgress, applyRenderStdout, type RenderProgress } from "./renderProgress";
 import { runBattle, captureFrames, packFrames, POWER_NAMES, normalizeConfig, type BattleConfig } from "@cellstorm/sim";
 import type { ScoreProfile } from "@cellstorm/score";
 
@@ -30,15 +33,19 @@ function arg(name: string): string | undefined {
   return i >= 0 ? process.argv[i + 1] : undefined;
 }
 
-// Resolve the tsx executable by absolute path (package-local, then workspace-hoisted .bin),
-// falling back to a bare "tsx" only if neither exists. Avoids PATH-dependent spawn failures.
-function resolveTsxBin(): string {
-  const ext = process.platform === "win32" ? ".cmd" : "";
-  const candidates = [
-    resolve(__dirname, "..", "node_modules", ".bin", "tsx" + ext),
-    resolve(__dirname, "..", "..", "..", "node_modules", ".bin", "tsx" + ext),
-  ];
-  return candidates.find((p) => existsSync(p)) ?? "tsx";
+// Child .ts processes (the sweep child, the renderer CLI) are launched as `node --import <tsx-loader>
+// <script.ts>` rather than via the tsx .bin shim. Spawning the platform shim is PATH-dependent and,
+// on Windows + Node 24, a .cmd can't be spawned without shell:true (which would mangle the JSON args
+// we pass to the renderer). Resolving the loader to an absolute file URL and handing it to node is
+// portable across macOS/Windows/Linux and independent of the child's cwd. Memoized.
+const requireHere = createRequire(import.meta.url);
+let _tsxLoaderUrl: string | undefined;
+function tsxLoaderUrl(): string {
+  return (_tsxLoaderUrl ??= pathToFileURL(requireHere.resolve("tsx")).href);
+}
+/** argv prefix that runs a .ts entry under tsx: [node, --import, <loader>] → append the script. */
+function nodeTsxArgs(scriptAndArgs: string[]): string[] {
+  return ["--import", tsxLoaderUrl(), ...scriptAndArgs];
 }
 
 const DB_PATH = resolve(arg("db") ?? process.env.CELLSTORM_DB ?? "./data/cellstorm.db");
@@ -299,8 +306,9 @@ async function handleApi(
     return true;
   }
 
-  // POST /api/render  body: { configId, hud?, scale? } — render an MP4 for a candidate, then
-  // reveal it in Finder and open it for playback (macOS `open`). Returns a renderId to poll.
+  // POST /api/render  body: { configId, hud?, scale? } — render an MP4 for a candidate, then reveal
+  // it in the OS file manager and open it for playback (per-OS; see revealCommands). Returns a
+  // renderId to poll.
   if (method === "POST" && path === "/api/render") {
     let body: { config?: BattleConfig; hud?: unknown; scale?: number };
     try {
@@ -369,11 +377,9 @@ function startSweepChild(job: {
   );
 
   const childEntry = resolve(__dirname, "sweepChild.ts");
-  // Spawn detached via tsx so the sweep survives independently of this request/connection.
-  // Resolve the tsx binary by absolute path rather than relying on PATH — the bridge is often
-  // launched directly (node_modules/.bin/tsx, dev.mjs) without node_modules/.bin on PATH, in
-  // which case a bare "tsx" fails with ENOENT and the sweep silently never starts (0/0 done).
-  const child = spawn(resolveTsxBin(), [childEntry, childJobPath], {
+  // Spawn detached as `node --import <tsx> sweepChild.ts` so the sweep survives independently of this
+  // request/connection and runs the .ts entry portably (no tsx .bin shim — see tsxLoaderUrl).
+  const child = spawn(process.execPath, nodeTsxArgs([childEntry, childJobPath]), {
     cwd: resolve(__dirname, ".."),
     detached: true,
     stdio: "ignore",
@@ -386,18 +392,13 @@ function startSweepChild(job: {
 }
 
 // --- render manager --------------------------------------------------------
-interface RenderState {
-  state: "rendering" | "encoding" | "done" | "error";
-  frames: number;
-  out: string;
-  error?: string;
-}
-const renders = new Map<string, RenderState>();
+const renders = new Map<string, RenderProgress>();
 
 /**
  * Render one candidate to an MP4 via the renderer CLI (Playwright frame capture + ffmpeg), then
- * reveal it in Finder and open it for playback. Defaults to a 1080-wide (Shorts) render for speed;
- * pass scale=1 for full 2160px. Progress is parsed from the CLI's stdout.
+ * reveal it in the OS file manager and open it for playback. Defaults to a 1080-wide (Shorts) render
+ * for speed; pass scale=1 for full 2160px. Progress (total frames, frames captured, encode phase) is
+ * parsed from the CLI's stdout into a RenderProgress the harness polls to drive its progress bar/ETA.
  */
 function startRender(config: BattleConfig, hud: unknown, scale?: number): { renderId: string; out: string } {
   const repoRoot = resolve(__dirname, "..", "..", "..");
@@ -408,27 +409,23 @@ function startRender(config: BattleConfig, hud: unknown, scale?: number): { rend
   const safe = `${config.teamCount}_${config.powers.join("_")}_${config.seed}`.replace(/[^a-zA-Z0-9]+/g, "_");
   const out = join(outDir, `${safe}-${Date.now()}.mp4`);
   const cliEntry = resolve(__dirname, "..", "..", "renderer", "src", "cli.ts");
-  const args = [
+  const args = nodeTsxArgs([
     cliEntry, "--config", JSON.stringify(config), "--out", out,
     "--scale", String(scale && scale > 0 ? scale : 0.5),
-  ];
+  ]);
   if (hud) args.push("--hud", JSON.stringify(hud));
 
   const renderId = `r-${Date.now()}`;
-  renders.set(renderId, { state: "rendering", frames: 0, out });
+  renders.set(renderId, initialRenderProgress(out, Date.now()));
 
-  const child = spawn(resolveTsxBin(), args, {
+  const child = spawn(process.execPath, args, {
     cwd: resolve(__dirname, "..", "..", "renderer"),
     env: process.env,
     stdio: ["ignore", "pipe", "pipe"],
   });
   child.stdout?.on("data", (b: Buffer) => {
-    const s = b.toString();
-    const m = /(\d+) frames captured/.exec(s);
-    const st = renders.get(renderId);
-    if (!st) return;
-    if (m) st.frames = Number(m[1]);
-    if (/Encoding\.\.\./.test(s)) st.state = "encoding";
+    const cur = renders.get(renderId);
+    if (cur) renders.set(renderId, applyRenderStdout(cur, b.toString(), Date.now()));
   });
   let errTail = "";
   child.stderr?.on("data", (b: Buffer) => {
@@ -436,19 +433,25 @@ function startRender(config: BattleConfig, hud: unknown, scale?: number): { rend
   });
   child.on("error", (err) => {
     const st = renders.get(renderId);
-    if (st) { st.state = "error"; st.error = err.message; }
+    if (st) renders.set(renderId, { ...st, state: "error", error: err.message });
   });
   child.on("close", (code) => {
     const st = renders.get(renderId);
     if (!st) return;
     if (code === 0) {
-      st.state = "done";
-      // macOS: reveal in Finder, then open in the default player for playback.
-      try { spawn("open", ["-R", out]); } catch { /* best-effort */ }
-      try { spawn("open", [out]); } catch { /* best-effort */ }
+      renders.set(renderId, { ...st, state: "done" });
+      // Reveal the file in the OS file manager, then open it in the default player. The exact
+      // commands are per-OS (Finder/open on macOS, Explorer/start on Windows, xdg-open on Linux);
+      // all are best-effort and their exit codes are ignored.
+      for (const { cmd, args: revealArgs } of revealCommands(process.platform, out)) {
+        try { spawn(cmd, revealArgs); } catch { /* best-effort */ }
+      }
     } else {
-      st.state = "error";
-      st.error = errTail.trim() || `renderer exited with code ${code}`;
+      renders.set(renderId, {
+        ...st,
+        state: "error",
+        error: errTail.trim() || `renderer exited with code ${code}`,
+      });
     }
   });
   return { renderId, out };

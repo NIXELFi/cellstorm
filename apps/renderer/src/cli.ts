@@ -9,6 +9,7 @@ import { parseArgs } from "node:util";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { normalizeConfig, type BattleConfig } from "@cellstorm/sim";
 import { renderBattleAudioWav } from "@cellstorm/audio";
 // Import the HUD config from the pure (no-Pixi) subpath export rather than the @cellstorm/render
@@ -103,7 +104,11 @@ async function main(argv: string[]): Promise<void> {
       framesDir,
       width,
       maxFrames,
+      // Emit a machine-parseable total so the harness can show a progress bar + ETA (see
+      // renderProgress.ts). progressEvery is small so the bar updates smoothly.
+      onStart: (total) => process.stdout.write(`Total frames: ${total}\n`),
       onProgress: (f) => process.stdout.write(`  ${f} frames captured...\n`),
+      progressEvery: 15,
     });
     process.stdout.write(
       `Captured ${result.frameCount} frames (${result.width}x${result.height}, ended=${result.ended}). Encoding...\n`,
@@ -118,7 +123,10 @@ async function main(argv: string[]): Promise<void> {
       process.stdout.write(`  audio: ${result.log.events.length} events scored -> ${audioPath}\n`);
     }
 
-    await encode({ framesDir, outPath: args.out, fps, audioPath });
+    // Delay the audio by the flash-forward teaser length so the soundtrack starts at the cut to t=0
+    // and stays in sync with the battle. The teaser plays silent (clean visual gut-punch).
+    const audioOffsetSec = result.teaserFrames / fps;
+    await encode({ framesDir, outPath: args.out, fps, audioPath, audioOffsetSec });
     process.stdout.write(`Done: ${args.out}${audioPath ? " (with sound)" : " (muted)"}\n`);
   } finally {
     if (!args.keep) rmSync(framesDir, { recursive: true, force: true });
@@ -126,9 +134,11 @@ async function main(argv: string[]): Promise<void> {
   }
 }
 
-// Run only when invoked directly (not on import), matching @cellstorm/cli's convention.
+// Run only when invoked directly (not on import). Compare via pathToFileURL so the check works on
+// Windows too — a raw `file://${process.argv[1]}` doesn't match import.meta.url there (backslashes,
+// drive letter, slash count all differ), which would silently skip main() under `node`/tsx.
 const invokedDirectly =
-  process.argv[1] !== undefined && import.meta.url === `file://${process.argv[1]}`;
+  process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (invokedDirectly) {
   main(process.argv.slice(2)).catch((err) => {
     process.stderr.write(`${err instanceof Error ? err.message : String(err)}\n`);

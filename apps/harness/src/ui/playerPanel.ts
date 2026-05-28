@@ -9,6 +9,8 @@ import { BattlePlayer, type HudConfig, type Theme } from "@cellstorm/render";
 import { DEFAULT_HUD } from "@cellstorm/render";
 import type { BattleConfig, BattleLog, DrawFrame, SimEvent } from "@cellstorm/sim";
 import { fetchFrames, startRender, fetchRenderProgress } from "../api";
+import { renderView } from "../renderProgress";
+import { buildOpeningSequence, DEFAULT_OPENING } from "@cellstorm/render/opening";
 import { climaxTick } from "./logLogic";
 import { PreviewAudio } from "./previewAudio";
 import { audioShouldPlay } from "./previewAudioLogic";
@@ -44,8 +46,13 @@ export class PlayerPanel {
   private frames: DrawFrame[] = [];
   private eventsByFrame: SimEvent[][] = [];
   private log?: BattleLog;
-  private idxF = 0; // current (fractional) frame index
-  private lastDrawn = -1;
+  // Cold-open playback order: [montage clips…, 0, 1, …, N]. `idxF`/`lastDrawn` are POSITIONS in
+  // `order` (not raw frame indices) so the preview plays the same montage → cut → battle as the render.
+  private order: number[] = [];
+  private cutAt = 0; // position in `order` where the real battle (t=0) begins
+  private cutPoints: number[] = []; // positions that are hard cuts (reset cosmetic FX on crossing)
+  private idxF = 0; // current (fractional) position in `order`
+  private lastDrawn = -1; // last drawn position in `order`
   private playing = false;
   private loadToken = 0; // guards against a superseded async frame load
 
@@ -137,8 +144,13 @@ export class PlayerPanel {
       for (const e of log.events) {
         if (e.tick >= 0 && e.tick < this.eventsByFrame.length) this.eventsByFrame[e.tick]!.push(e);
       }
+      // Same cold-open sequence the renderer uses (WYSIWYG): flash-forward teaser, then cut to t=0.
+      const seq = buildOpeningSequence(log, frames.length, DEFAULT_OPENING);
+      this.order = seq.order;
+      this.cutAt = seq.cutAt;
+      this.cutPoints = seq.cutPoints;
       this.audio.setLog(log);
-      this.scrub.max = String(Math.max(1, frames.length - 1));
+      this.scrub.max = String(Math.max(1, this.order.length - 1));
       this.lastDrawn = -1;
       this.idxF = 0;
       this.drawAt(0, false);
@@ -150,11 +162,14 @@ export class PlayerPanel {
   private startLoop(): void {
     if (this.rafId) cancelAnimationFrame(this.rafId);
     const tick = () => {
-      if (this.playing && this.frames.length > 0) {
-        const last = this.frames.length - 1;
+      if (this.playing && this.order.length > 0) {
+        const last = this.order.length - 1;
+        const prevPos = Math.floor(this.idxF);
         this.idxF = Math.min(this.idxF + this.speed, last);
-        const i = Math.floor(this.idxF);
-        if (i !== this.lastDrawn) this.drawAt(i, true);
+        const pos = Math.floor(this.idxF);
+        if (pos !== this.lastDrawn) this.drawAt(pos, true);
+        // The teaser is silent; start the soundtrack right as playback crosses the cut to t=0.
+        if (this.soundOn && prevPos < this.cutAt && pos >= this.cutAt) this.syncAudio();
         if (this.idxF >= last) {
           this.setPlaying(false);
           this.audio.stop();
@@ -165,27 +180,37 @@ export class PlayerPanel {
     this.rafId = requestAnimationFrame(tick);
   }
 
-  /** Draw frame `i`. When `withEvents`, replay the events of every frame since the last drawn one
-   *  (so cosmetic FX + the shake/aberration impact fire); on a scrub/seek we draw without events. */
-  private drawAt(i: number, withEvents: boolean): void {
+  /** Draw output position `pos` (an index into `order`). During the teaser the HUD is hidden; at the
+   *  cut to t=0 cosmetic FX are reset. When `withEvents`, replay the events of every position since
+   *  the last drawn one (so cosmetic FX + the shake/aberration impact fire); a scrub draws without. */
+  private drawAt(pos: number, withEvents: boolean): void {
     if (!this.player) return;
-    const f = this.frames[i];
+    const frameIndex = this.order[pos];
+    if (frameIndex === undefined) return;
+    const f = this.frames[frameIndex];
     if (!f) return;
+    const hudHidden = pos < this.cutAt; // title-free flash-forward montage
+    // Reset cosmetic FX whenever playback crosses a hard cut (montage clip boundary or the cut to t=0)
+    // so particles/shake don't bleed across the scene change.
+    const resetCosmetic = this.cutPoints.some((c) => c > this.lastDrawn && c <= pos);
     let evs: SimEvent[] = [];
-    if (withEvents && i > this.lastDrawn) {
-      for (let j = this.lastDrawn + 1; j <= i; j++) evs = evs.concat(this.eventsByFrame[j] ?? []);
+    if (withEvents && pos > this.lastDrawn) {
+      for (let p = this.lastDrawn + 1; p <= pos; p++) {
+        const fi = this.order[p];
+        if (fi !== undefined) evs = evs.concat(this.eventsByFrame[fi] ?? []);
+      }
     }
-    this.player.renderSnapshot(f, withEvents ? evs : []);
-    this.lastDrawn = i;
-    this.idxF = i;
-    this.updateLabel(i);
+    this.player.renderSnapshot(f, withEvents ? evs : [], { hudHidden, resetCosmetic });
+    this.lastDrawn = pos;
+    this.idxF = pos;
+    this.updateLabel(pos);
   }
 
-  private updateLabel(i: number): void {
-    const last = this.frames.length - 1;
-    this.scrub.value = String(i);
-    const sec = (i / 60).toFixed(1);
-    this.frameLabel.textContent = i >= last && last > 0 ? `${sec}s / ${(last / 60).toFixed(1)}s (ended)` : `${sec}s`;
+  private updateLabel(pos: number): void {
+    const last = this.order.length - 1;
+    this.scrub.value = String(pos);
+    const sec = (pos / 60).toFixed(1);
+    this.frameLabel.textContent = pos >= last && last > 0 ? `${sec}s / ${(last / 60).toFixed(1)}s (ended)` : `${sec}s`;
   }
 
   private setPlaying(p: boolean): void {
@@ -205,7 +230,7 @@ export class PlayerPanel {
         this.setPlaying(false);
         this.audio.stop();
       } else {
-        if (this.idxF >= this.frames.length - 1) { this.idxF = 0; this.lastDrawn = -1; } // replay from start
+        if (this.idxF >= this.order.length - 1) { this.idxF = 0; this.lastDrawn = -1; } // replay from start (incl. teaser)
         this.setPlaying(true);
         this.syncAudio();
       }
@@ -215,9 +240,9 @@ export class PlayerPanel {
     stepBtn.className = "btn";
     stepBtn.textContent = "Step";
     stepBtn.onclick = () => {
-      if (this.frames.length === 0) return;
+      if (this.order.length === 0) return;
       this.setPlaying(false);
-      this.drawAt(Math.min(this.lastDrawn + 1, this.frames.length - 1), true);
+      this.drawAt(Math.min(this.lastDrawn + 1, this.order.length - 1), true);
     };
 
     const climax = document.createElement("button");
@@ -293,48 +318,59 @@ export class PlayerPanel {
     this.renderCmd.hidden = false;
     this.renderCmd.innerHTML = "";
     const status = document.createElement("div");
-    status.className = "muted";
+    status.className = "muted render-status";
     status.textContent = "Starting render…";
-    this.renderCmd.appendChild(status);
+    const bar = document.createElement("div");
+    bar.className = "render-bar indeterminate";
+    const fill = document.createElement("div");
+    fill.className = "render-bar-fill";
+    bar.appendChild(fill);
+    this.renderCmd.append(status, bar);
 
     let renderId: string;
     try {
       ({ renderId } = await startRender(this.config, this.hud));
     } catch (err) {
       status.textContent = `Couldn't start render: ${err instanceof Error ? err.message : String(err)}`;
+      bar.classList.add("error");
       return;
     }
     const poll = window.setInterval(() => {
       void fetchRenderProgress(renderId)
         .then((st) => {
-          if (st.state === "rendering") status.textContent = `Rendering… ${st.frames} frames captured`;
-          else if (st.state === "encoding") status.textContent = `Encoding ${st.frames} frames to MP4…`;
-          else if (st.state === "done") {
-            status.textContent = "Done — opening in Finder + player ✓";
-            window.clearInterval(poll);
-          } else if (st.state === "error") {
-            status.textContent = `Render failed: ${st.error ?? "unknown error"}`;
-            window.clearInterval(poll);
-          }
+          const v = renderView(st, Date.now());
+          status.textContent = v.label;
+          fill.style.width = `${Math.round(v.fraction * 100)}%`;
+          bar.classList.toggle("indeterminate", v.indeterminate);
+          bar.classList.toggle("done", st.state === "done");
+          bar.classList.toggle("error", st.state === "error");
+          if (v.terminal) window.clearInterval(poll);
         })
         .catch(() => {});
-    }, 700);
+    }, 400);
   }
 
   private syncAudio(): void {
-    const last = this.frames.length - 1;
-    const ok = audioShouldPlay({ enabled: this.soundOn, playing: this.playing, speed: this.speed, ended: this.idxF >= last });
-    if (ok) this.audio.start(Math.floor(this.idxF));
+    const last = this.order.length - 1;
+    const pos = Math.floor(this.idxF);
+    // The soundtrack is the battle (real ticks 0..N); the teaser plays silent. Map the output
+    // position back to the real battle tick and only play once we're past the cut.
+    const realTick = Math.max(0, pos - this.cutAt);
+    const ok =
+      pos >= this.cutAt &&
+      audioShouldPlay({ enabled: this.soundOn, playing: this.playing, speed: this.speed, ended: this.idxF >= last });
+    if (ok) this.audio.start(realTick);
     else this.audio.stop();
   }
 
   private jumpToClimax(): void {
-    if (!this.log || this.frames.length === 0) return;
-    const tick = Math.min(climaxTick(this.log), this.frames.length - 1);
+    if (!this.log || this.order.length === 0) return;
+    // climaxTick is a real battle tick; map it into the output timeline (past the teaser cut).
+    const pos = Math.min(this.cutAt + climaxTick(this.log), this.order.length - 1);
     this.setPlaying(false);
     this.audio.stop();
     this.lastDrawn = -1; // force a fresh draw without replaying intervening events
-    this.drawAt(tick, false);
+    this.drawAt(pos, false);
   }
 
   private teardownPlayer(): void {

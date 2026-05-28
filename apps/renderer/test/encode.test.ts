@@ -47,4 +47,19 @@ describe("ffmpegArgs", () => {
     // output path is last
     expect(args[args.length - 1]).toBe("out.mp4");
   });
+
+  it("delays the audio with -itsoffset (before the audio input) when an offset is given", () => {
+    const args = ffmpegArgs("/tmp/frames", 60, "out.mp4", "/tmp/frames/audio.wav", 0.32);
+    const off = args.indexOf("-itsoffset");
+    expect(off).toBeGreaterThan(-1);
+    expect(args[off + 1]).toBe("0.32");
+    // -itsoffset must come immediately before the audio -i (it applies to the next input).
+    expect(args[off + 2]).toBe("-i");
+    expect(args[off + 3]).toBe("/tmp/frames/audio.wav");
+  });
+
+  it("omits -itsoffset when the offset is zero", () => {
+    const args = ffmpegArgs("/tmp/frames", 60, "out.mp4", "/tmp/frames/audio.wav", 0);
+    expect(args).not.toContain("-itsoffset");
+  });
 });

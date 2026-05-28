@@ -5,7 +5,8 @@
   "main": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
-    "./hud-config": "./src/hud/types.ts"
+    "./hud-config": "./src/hud/types.ts",
+    "./opening": "./src/opening.ts"
   },
   "dependencies": {
     "@cellstorm/sim": "workspace:*",

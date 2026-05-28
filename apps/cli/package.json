@@ -13,7 +13,9 @@
   },
   "dependencies": {
     "@cellstorm/sim": "workspace:*",
-    "@cellstorm/score": "workspace:*",
+    "@cellstorm/score": "workspace:*"
+  },
+  "optionalDependencies": {
     "better-sqlite3": "^11.0.0"
   },
   "devDependencies": {

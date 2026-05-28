@@ -6,6 +6,7 @@
 import { unpackFrames, type BattleConfig, type BattleLog, type DrawFrame } from "@cellstorm/sim";
 import type { ResultRow, SweepSpec } from "@cellstorm/cli";
 import type { ScoreProfile } from "@cellstorm/score";
+import type { RenderProgress } from "./renderProgress";
 
 export interface SweepProgress {
   done: number;
@@ -88,12 +89,8 @@ export function fetchDbPath(): Promise<{ dbPath: string }> {
 export function fetchLatestBatch(): Promise<{ batchId: string | null }> {
   return getJson<{ batchId: string | null }>("/api/latest-batch");
 }
-export interface RenderState {
-  state: "rendering" | "encoding" | "done" | "error";
-  frames: number;
-  out: string;
-  error?: string;
-}
+// The bridge serializes a RenderProgress (frames, total, timing) so the UI can show a real bar + ETA.
+export type RenderState = RenderProgress;
 export async function startRender(
   config: BattleConfig,
   hud: unknown,

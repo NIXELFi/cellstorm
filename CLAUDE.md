@@ -57,7 +57,12 @@ every run. This makes "score then render" valid.
 
 ## Running it
 
-Toolchain: Node 20, pnpm 9, ffmpeg (system), Playwright Chromium (for rendering). macOS.
+Toolchain: pnpm 9. ffmpeg is bundled via the `ffmpeg-static` npm package (no system install); only
+Playwright Chromium needs a one-time `pnpm --filter @cellstorm/renderer exec playwright install
+chromium`. Both are needed for *rendering only*. **Cross-platform: macOS + Windows** (Linux should
+work too). Node 20+ on macOS; **Node 22.5+ on Windows** — the SQLite store auto-detects its backend
+(native `better-sqlite3`, else Node's built-in `node:sqlite`), so Windows runs with no C++ build
+tools. See "Cross-platform notes" below.
 
 ```bash
 pnpm install
@@ -127,17 +132,38 @@ studies (see the `apps/lab/*.mts` scripts; rebuild similar ones to re-tune).
 ---
 
 ## Rendering & HUD
+- **Cold-open hook (shared `@cellstorm/render/opening`):** every render — AND the harness preview —
+  OPENS on a ~0.9s title-free **rapid multi-cut montage** (default 3 hard cuts, ~300ms each) of distinct
+  peak-action moments, building to the most intense, then HARD-CUTS to t=0 where the title is composited as an
+  **overlay over the live battle** (never a static card; the sim never freezes). Retention fix — a static
+  title card had a ~75% swipe-away; a single continuous clip read as an accidental leftover, so it's a
+  montage. It's purely a reorder of the already-computed frames (`buildOpeningSequence` →
+  `{order:[clip1…,clip2…,clip3…,0..N], cutAt, cutPoints}`), so the battle is byte-identical (A/B-safe);
+  the teaser's large ticks make the tick-driven title auto-absent there, and pre-resolution ticks keep
+  the winner card from leaking. Peaks: the back 60% of the fight is split into N **time bands**
+  (distinct phases → visually different cuts), each band's densest weighted window (death×3 + explosion×2
+  + projectile×0.5) is a clip; low-action bands (<25% of the strongest) are dropped so it never cuts to a
+  lull; clips are ordered escalating. FX are reset at **every** cut (`cutPoints` → `resetCosmeticState`);
+  at the final cut the HUD un-hides + primes counts so they're correct from frame one. Audio is delayed
+  by the teaser length (ffmpeg `-itsoffset`) so it still lines up with the battle (teaser is silent).
+  Tunable via `DEFAULT_OPENING` (`teaserMs`, `cuts`, `peakBackFraction`, `enabled`); default ON. The
+  preview plays the montage too (playback is sequence-position-based over `order`), so it's WYSIWYG.
 - **WYSIWYG:** harness preview and the 4K/1080 renderer use the SAME `BattlePlayer` + `CssHud`.
 - Renderer (`apps/renderer`): esbuild bundles `page-entry.ts` (BattlePlayer + pixi) into an IIFE,
   Playwright injects it, steps one frame per tick, **screenshots the full page** (canvas + CSS HUD
   overlay), waits for `document.fonts.ready`, then ffmpeg → MP4. Default scale 0.5 = **1080×1920**
   (Shorts-native, ~1–2 min). `scale 1` = 2160×3840 (much slower via per-frame screenshots).
 - The harness "Render video" button → `POST /api/render` spawns the renderer CLI, tracks progress
-  via stdout, and on success runs macOS `open -R` (reveal in Finder) + `open` (playback).
+  via stdout, and on success reveals + opens the file via the OS file manager (per-OS commands in
+  `apps/harness/src/revealCommands.ts`: Finder/`open` on macOS, Explorer/`start` on Windows,
+  `xdg-open` on Linux). Best-effort; exit codes ignored.
 - **HUD is real DOM/CSS** (`packages/render/src/cssHud.ts`), overlaid on the canvas — Anton (display)
   + Archivo, on the dark neon field. Three parts, all tick-driven:
-  - **Intro** (~2s): "CELLSTORM / WHO SURVIVES? / N teams… last cell wins" + per-power chips with
-    one-line descriptions (`descs.ts`); fades out on the tick. Lighter scrim so the battle shows.
+  - **Intro** (~2.5s, `introSeconds`): "CELLSTORM / WHO SURVIVES? / N teams… last cell wins" + per-power
+    chips (`descs.ts`); a LIGHT scrim overlaid on the **live battle** (counts strip stays visible
+    underneath from frame one), fading out on the tick. After the cold-open cut, this is the title that
+    sits over the already-running battle (see "Cold-open hook" above). `CssHud.setHidden` suppresses the
+    whole HUD during the teaser; `primeCounts` seeds the live numbers at the cut.
   - **Top strip** (live): a slim proportional segmented bar (each team sized by cell share, shrinks
     as it dies) + a single **centered, auto-fit** label row (color dot + power name + count). Sits
     on a darkening+blur scrim (`.cs-topscrim`). NO descriptions in the live HUD (they're in intro).
@@ -216,11 +242,31 @@ Float32 PCM) -> pcmToWav()`. No samples — everything is synthesized (oscillato
 ## Status / possible next steps
 V1 is built and on `main` (merged from `feat/cellstorm-v1`). The renderer produces real 1080×1920
 60fps MP4s with the full broadcast HUD baked in **and a synthesized soundtrack** (see Audio above;
-on `feat/cellstorm-audio`, 173 tests green). Open follow-ups discussed but not built: the
-**flash-forward-to-climax intro hook** (highest-leverage retention move; the climax primitive exists
-in `logLogic.climaxTick`), kiting AI for ranged powers, a render resolution toggle (1080/4K) + faster
-capture (CDP screencast), and an end-to-end integration test for the harness→bridge→render flow.
+on `feat/cellstorm-audio`, 173 tests green). The **cold-open flash-forward hook is now built** (see
+"Cold-open hook" under Rendering & HUD — `opening.ts`); it replaced the static title card that was
+causing the ~75% swipe-away. Open follow-ups discussed but not built: kiting AI for ranged powers, a
+render resolution toggle (1080/4K) + faster capture (CDP screencast), and an end-to-end integration
+test for the harness→bridge→render flow.
 Audio follow-ups: richer per-power leitmotifs, sidechain/ducking, and a stereo-width pass.
+
+## Cross-platform notes (macOS + Windows)
+Everything except the *external render tools* (ffmpeg, Playwright Chromium) runs on both OSes from the
+same code. The platform-specific seams and how they're handled:
+- **SQLite backend is auto-selected by capability** (`apps/cli/src/sqlite.ts`): it probes native
+  `better-sqlite3` (constructs an in-memory db — `require` alone succeeds even when the native binary
+  is missing) and falls back to Node's built-in `node:sqlite` (`DatabaseSync`, Node ≥ 22.5). So macOS
+  keeps native speed and Windows runs with no MSVC toolchain. `better-sqlite3` is an
+  **optionalDependency** — if its build fails (e.g. on Windows), `pnpm install` still completes.
+  `node:sqlite` emits a one-line `ExperimentalWarning` per process; harmless.
+- **Child .ts processes are launched as `node --import <tsx-loader> script.ts`**, never via the tsx
+  `.bin` shim. Node 24 on Windows refuses to spawn a `.cmd` without `shell:true`, and `shell:true`
+  would mangle the JSON `--config`/`--hud` args. The loader is resolved to a `file://` URL (a bare
+  `C:\` path is rejected by `--import`). Applies to `dev.mjs`, and the sweep/render spawns in
+  `server.ts`. (The sweep's *worker threads* already use a `new URL(...)` bootstrap — portable.)
+- **Reveal/open after a render** branches on `process.platform` — see the "Render video" note above.
+- **Log-cache filenames encode the configId** (`encodeURIComponent`) because the id contains `:`,
+  which is illegal in Windows filenames (`store.ts`). Reversed in `cachedLogIds`.
+- **Tests use `os.tmpdir()`**, not hardcoded `/tmp`.
 
 ## Conventions
 - End git commit messages with: `Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>`

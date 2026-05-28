@@ -68,6 +68,20 @@ export class CssHud {
     return { ...this.config };
   }
 
+  /** Hide/show the entire HUD overlay. Used to suppress it during the title-free flash-forward
+   *  teaser so the opening burst reads as a pure visual gut-punch. */
+  setHidden(hidden: boolean): void {
+    this.root.style.visibility = hidden ? "hidden" : "visible";
+  }
+
+  /** Seed the eased counters to exact counts (no animation). Called at the teaser cut so the live
+   *  numbers are correct from the first real frame instead of sliding up from zero. */
+  primeCounts(counts: number[]): void {
+    for (let t = 0; t < this.rows.length; t++) {
+      this.rows[t]!.display = Math.max(0, counts[t] ?? 0);
+    }
+  }
+
   /** Tick-driven update. counts: live per-team alive counts. winner: -2/-1/team. */
   update(counts: number[], tick: number, winner: number): void {
     const lead = leaderTeam(counts);
@@ -85,13 +99,14 @@ export class CssHud {
     }
     this.fitLabels();
 
-    // Intro fade (tick-driven). The side scoreboard fades IN as the intro fades out, so the two
-    // don't clash on screen at the start.
+    // Intro fade (tick-driven). The title is an OVERLAY: the live count strip + scrim stay visible
+    // underneath it from the first frame (counts are part of the team-rooting hook), and the intro's
+    // own light scrim lets the battle show through. The title card then fades out over its window.
     const ia = this.config.showIntro ? introAlpha(tick, this.config.introSeconds) : 0;
     this.intro.style.opacity = String(ia);
     this.intro.style.display = ia <= 0.001 ? "none" : "flex";
-    this.side.style.opacity = String(1 - ia);
-    this.scrim.style.opacity = String(1 - ia);
+    this.side.style.opacity = "1";
+    this.scrim.style.opacity = "1";
 
     // Winner reveal (tick-driven pop-in). Reset if we scrub back before resolution.
     if (winner < 0) {
@@ -318,7 +333,9 @@ const CSS = `
 
 .cs-intro {
   position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-  background: radial-gradient(110% 80% at 50% 46%, rgba(5,2,10,0.35) 0%, rgba(5,2,10,0.74) 72%);
+  /* Light scrim: the title is an overlay over the LIVE battle, so keep the action clearly visible
+     underneath (not a near-opaque card). Readability comes from the text's own shadow/gradient. */
+  background: radial-gradient(120% 85% at 50% 46%, rgba(5,2,10,0.18) 0%, rgba(5,2,10,0.5) 78%);
   text-align: center; padding: 5cqh;
 }
 .cs-intro-inner { display: flex; flex-direction: column; align-items: center; gap: 1.8cqh; max-width: 88%; }

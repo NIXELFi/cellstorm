@@ -6,9 +6,17 @@ tune candidates in the harness, render a video, and use the dev lab.
 
 ## Prerequisites
 
-- **Node 20** (tested on v20.11.0).
+Runs on **macOS and Windows** (Linux should work too).
+
+- **Node**: 20+ on macOS, **22.5+ on Windows**. The SQLite store auto-selects native
+  `better-sqlite3` when it can build (macOS) and otherwise falls back to Node's built-in
+  `node:sqlite` (needs Node ≥ 22.5), so **Windows needs no C++ build tools**. `better-sqlite3` is an
+  optional dependency — if its native build fails (e.g. no MSVC on Windows), `pnpm install` still
+  succeeds and the store uses `node:sqlite`.
 - **pnpm** (tested on 9.15.9).
-- **ffmpeg** on your `PATH` (used by the renderer to encode frames to MP4).
+- **ffmpeg** — **bundled** via the `ffmpeg-static` npm package, installed automatically with
+  `pnpm install`. No system ffmpeg needed; a system `ffmpeg` on `PATH` is used as a fallback if the
+  bundled binary is ever missing. (Only used for rendering.)
 - **Playwright Chromium** — only needed for rendering. After `pnpm install`:
 
   ```bash
@@ -70,7 +78,8 @@ pnpm --filter @cellstorm/cli start stop --db /Users/me/cellstorm-data/cellstorm.
 
 The harness is a browser UI for browsing the ranked grid, replaying a candidate in the
 shared player (preview == render), and tuning the HUD. `pnpm harness` (root script) runs
-the bridge server **and** Vite together via `concurrently`.
+the bridge server **and** Vite together via the `apps/harness/dev.mjs` launcher (it spawns each
+with `node` directly, so it behaves identically on macOS and Windows).
 
 ```bash
 pnpm harness

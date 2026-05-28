@@ -47,6 +47,8 @@ export class BattlePlayer {
   private cosmetic: ParticleField;
   private readonly postfx: PostFx;
   private impact = 0; // 0..1 screen-shake / aberration envelope, decays each tick
+  private hudHidden = false; // suppress the HUD (used for the title-free flash-forward teaser)
+  private lastHudHidden = false; // detect the un-hide edge at the teaser cut (to prime counters)
   private teamRadii: number[] = []; // per-team cell radius, for reconstructing draw-worlds on replay
   private state: SimState;
   private sink: EventSink;
@@ -190,12 +192,30 @@ export class BattlePlayer {
    * renderer and harness both feed DrawFrames produced once in Node, so what's drawn is identical on
    * every engine. `newEvents` are this tick's events (for cosmetic FX + the impact envelope).
    */
-  renderSnapshot(frame: DrawFrame, newEvents: SimEvent[]): void {
+  renderSnapshot(
+    frame: DrawFrame,
+    newEvents: SimEvent[],
+    opts?: { hudHidden?: boolean; resetCosmetic?: boolean },
+  ): void {
+    if (opts?.resetCosmetic) this.resetCosmeticState();
     this.state = { world: this.reconstructWorld(frame), ended: frame.resolvedFrame >= 0 };
+    const hudHidden = opts?.hudHidden ?? false;
+    // When the HUD un-hides at the teaser cut, seed the counters to the true counts so they don't
+    // visibly ease up from zero on the first real frame (counts are part of the team-rooting hook).
+    if (this.lastHudHidden && !hudHidden) this.hud?.primeCounts(countsOf(this.state.world));
+    this.lastHudHidden = hudHidden;
+    this.hudHidden = hudHidden;
     for (const e of newEvents) this.applyEventFx(e);
     this.impact = decayImpact(this.impact, impactFromEvents(newEvents), IMPACT_DECAY);
     this.cosmetic.advance();
     this.render();
+  }
+
+  /** Reset cosmetic-only state (particles + screen-shake/aberration envelope). Called at the flash-
+   *  forward cut so teaser FX don't bleed into the real first frame. Touches NO gameplay/scoring. */
+  resetCosmeticState(): void {
+    this.cosmetic = new ParticleField(this.cosmeticPrng());
+    this.impact = 0;
   }
 
   /** Rebuild a draw-only World from a DrawFrame so scene/HUD code runs unchanged. */
@@ -216,7 +236,13 @@ export class BattlePlayer {
 
   private render(): void {
     this.scene.draw(this.state.world, this.cosmetic);
-    this.hud?.update(countsOf(this.state.world), this.state.world.frame, this.state.world.winner);
+    if (this.hud) {
+      this.hud.setHidden(this.hudHidden);
+      // Skip the HUD update while hidden so its eased counters don't drift to the teaser's counts.
+      if (!this.hudHidden) {
+        this.hud.update(countsOf(this.state.world), this.state.world.frame, this.state.world.winner);
+      }
+    }
     const w = this.state.world;
     const flash = winnerFlash(w.frame, w.resolvedFrame, 60, FLASH_SEC);
     this.postfx.update(w.frame, this.impact, flash);

@@ -308,6 +308,45 @@ input[type="range"] {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
+/* Render progress bar + ETA (driven by renderProgress.renderView). */
+.render-status {
+  margin-top: 4px;
+}
+.render-bar {
+  position: relative;
+  margin-top: 6px;
+  height: 8px;
+  border-radius: 999px;
+  background: #00000055;
+  border: 1px solid var(--line);
+  overflow: hidden;
+}
+.render-bar-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent-2), var(--accent));
+  transition: width 0.3s ease;
+}
+.render-bar.done .render-bar-fill {
+  background: linear-gradient(90deg, #34d399, #10b981);
+}
+.render-bar.error .render-bar-fill {
+  width: 100% !important;
+  background: linear-gradient(90deg, #f87171, #ef4444);
+  animation: none;
+}
+/* Indeterminate (preparing / encoding): a sweeping chunk instead of a measured fill. */
+.render-bar.indeterminate .render-bar-fill {
+  width: 35% !important;
+  transition: none;
+  animation: cs-render-sweep 1.1s ease-in-out infinite;
+}
+@keyframes cs-render-sweep {
+  0% { margin-left: -35%; }
+  100% { margin-left: 100%; }
+}
+
 /* Score profile editor */
 .profile-editor {
   margin-bottom: 10px;

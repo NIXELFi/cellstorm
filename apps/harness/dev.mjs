@@ -8,18 +8,25 @@
 // together on Ctrl-C or if either one dies.
 import { spawn } from "node:child_process";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { existsSync } from "node:fs";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { createRequire } from "node:module";
+import { readFileSync } from "node:fs";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const binExt = process.platform === "win32" ? ".cmd" : "";
-// tsx and vite live in the workspace-hoisted .bin; fall back to the package-local .bin.
-function bin(name) {
-  const candidates = [
-    join(here, "node_modules", ".bin", name + binExt),
-    join(here, "..", "..", "node_modules", ".bin", name + binExt),
-  ];
-  return candidates.find((p) => existsSync(p)) ?? name;
+const require = createRequire(import.meta.url);
+
+// We run both children as `node <script>` rather than spawning the platform .bin shims. Node 24 on
+// Windows refuses to spawn a .cmd/.bat without shell:true (and shell:true would mangle quoted args),
+// so resolving the real JS entry and handing it to node is the portable path that works everywhere.
+// `--import` needs a file:// URL (a bare Windows C:\ path is rejected by the ESM loader).
+const tsxLoader = pathToFileURL(require.resolve("tsx")).href; // `node --import <it>` registers TS.
+
+// Absolute path to a dependency's bin script (a plain .js/.mjs we run with node).
+function binScript(pkg, binName) {
+  const pkgJsonPath = require.resolve(`${pkg}/package.json`);
+  const pj = JSON.parse(readFileSync(pkgJsonPath, "utf8"));
+  const rel = typeof pj.bin === "string" ? pj.bin : pj.bin[binName];
+  return join(dirname(pkgJsonPath), rel);
 }
 
 const port = process.env.PORT ?? "5174";
@@ -52,5 +59,5 @@ function shutdown(code) {
 process.on("SIGINT", () => shutdown(0));
 process.on("SIGTERM", () => shutdown(0));
 
-start("server", bin("tsx"), ["src/server.ts"]);
-start("vite", bin("vite"), []);
+start("server", process.execPath, ["--import", tsxLoader, "src/server.ts"]);
+start("vite", process.execPath, [binScript("vite", "vite")]);

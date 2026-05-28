@@ -19,5 +19,5 @@ export const DEFAULT_HUD: HudConfig = {
   showIntro: true,
   showWinner: true,
   introTitle: "",
-  introSeconds: 2,
+  introSeconds: 2.5,
 };

@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { build } from "esbuild";
 import { captureFrames, packFrames, type BattleConfig, type BattleLog } from "@cellstorm/sim";
 import type { HudConfig } from "@cellstorm/render/hud-config";
+import { buildOpeningSequence, DEFAULT_OPENING, type OpeningConfig } from "@cellstorm/render/opening";
 
 // Master 9:16 resolution for production renders.
 export const MASTER_WIDTH = 2160;
@@ -26,6 +27,11 @@ export interface RenderOptions {
   width?: number;
   /** Hard cap on captured frames (safety + fast smoke renders). */
   maxFrames?: number;
+  /** Cold-open hook config (flash-forward teaser). Defaults to DEFAULT_OPENING; pass `enabled:false`
+   *  to render the plain battle. Overrides are shallow-merged onto the defaults. */
+  opening?: Partial<OpeningConfig>;
+  /** Called once with the total frame count before the capture loop starts (for progress %/ETA). */
+  onStart?: (total: number) => void;
   /** Progress callback, called every `progressEvery` frames. */
   onProgress?: (frame: number) => void;
   progressEvery?: number;
@@ -36,6 +42,9 @@ export interface RenderResult {
   ended: boolean;
   width: number;
   height: number;
+  /** Number of flash-forward teaser frames prepended before t=0 (0 if no teaser). The caller offsets
+   *  the audio by this many frames so the soundtrack still lines up with the real battle. */
+  teaserFrames: number;
   /** The authoritative battle log from the SAME Node simulation that produced the frames (so the
    *  caller can generate perfectly-synced audio from it — single source of truth). */
   log: BattleLog;
@@ -82,13 +91,25 @@ export async function renderBattle(opts: RenderOptions): Promise<RenderResult> {
   const { log, frames } = captureFrames(opts.config);
   const framesB64 = Buffer.from(packFrames(frames)).toString("base64");
 
+  const total = Math.min(frames.length, maxFrames);
+
+  // COLD OPEN: decide the output frame ORDER — a short flash-forward of peak action, then a hard cut
+  // to t=0. This only reorders/prepends the already-computed frames (no re-sim), so the battle stays
+  // byte-identical; only the opening composition changes. The teaser frames carry large sim ticks, so
+  // the title overlay (tick-driven) is automatically absent there and the winner card can't leak.
+  const opening: OpeningConfig = { ...DEFAULT_OPENING, ...opts.opening };
+  const sequence = buildOpeningSequence(log, total, opening);
+
+  // Announce the full output length (teaser + battle) up front so the caller's progress bar/ETA is
+  // accurate, not an open-ended "N frames captured".
+  opts.onStart?.(sequence.order.length);
+
   // Bundle first so a bundling failure aborts before launching a browser.
   const pageScript = await bundlePageScript();
   const { chromium } = await import("playwright");
 
   const browser = await chromium.launch({ headless: true });
   let frameCount = 0;
-  const total = Math.min(frames.length, maxFrames);
   try {
     const page = await browser.newPage({ viewport: { width, height } });
     await page.setContent(PAGE_HTML, { waitUntil: "load" });
@@ -102,8 +123,15 @@ export async function renderBattle(opts: RenderOptions): Promise<RenderResult> {
     // Screenshot the full viewport (canvas + CSS HUD overlay) so the broadcast HUD bakes in.
     const shot = () => page.screenshot({ path: join(opts.framesDir, frameFileName(frameCount)) });
 
-    for (let i = 0; i < total; i++) {
-      await page.evaluate((idx) => window.__cellstorm.drawFrame(idx), i);
+    const cutSet = new Set(sequence.cutPoints);
+    for (let i = 0; i < sequence.order.length; i++) {
+      const frameIndex = sequence.order[i]!;
+      const hudHidden = i < sequence.cutAt; // teaser montage: clean, title-free
+      const resetCosmetic = cutSet.has(i); // wipe FX at every hard cut so each clip lands clean
+      await page.evaluate(
+        (a) => window.__cellstorm.drawFrame(a.idx, a.hud, a.reset),
+        { idx: frameIndex, hud: hudHidden, reset: resetCosmetic },
+      );
       await shot();
       frameCount++;
       if (opts.onProgress && frameCount % progressEvery === 0) opts.onProgress(frameCount);
@@ -112,5 +140,5 @@ export async function renderBattle(opts: RenderOptions): Promise<RenderResult> {
     await browser.close();
   }
 
-  return { frameCount, ended: total >= frames.length, width, height, log };
+  return { frameCount, ended: total >= frames.length, width, height, teaserFrames: sequence.cutAt, log };
 }

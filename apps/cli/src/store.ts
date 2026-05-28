@@ -1,4 +1,4 @@
-import Database from "better-sqlite3";
+import { openDatabase, type SqliteDatabase, type SqliteStatement } from "./sqlite";
 import { gzipSync, gunzipSync } from "node:zlib";
 import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync, readdirSync } from "node:fs";
 import { join } from "node:path";
@@ -32,12 +32,12 @@ interface RawRow {
 export { configIdOf, configId } from "./configId";
 
 export class Store {
-  private db: Database.Database;
+  private db: SqliteDatabase;
   private logsDir: string;
 
   constructor(private dbPath: string) {
-    this.db = new Database(dbPath);
-    this.db.pragma("journal_mode = WAL");
+    this.db = openDatabase(dbPath);
+    this.db.exec("PRAGMA journal_mode = WAL");
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS results (
         configId TEXT PRIMARY KEY,
@@ -89,8 +89,8 @@ export class Store {
     this.insertStmt().run(this.toRaw(row));
   }
 
-  private _insertStmt?: Database.Statement;
-  private insertStmt(): Database.Statement {
+  private _insertStmt?: SqliteStatement;
+  private insertStmt(): SqliteStatement {
     if (!this._insertStmt) {
       // INSERT OR REPLACE: a re-run of the same configId (same teamCount:powers:seed)
       // overwrites the prior row. This is the intended cross-batch overwrite semantic —
@@ -157,14 +157,21 @@ export class Store {
     return r ? (JSON.parse(r.config) as BattleConfig) : null;
   }
 
+  // configId is `teamCount:powers:seed` (e.g. "2:Goliath,Sniper:1"). The ':' is illegal in Windows
+  // filenames, so the on-disk log cache encodes the id. encodeURIComponent is reversible (decoded in
+  // cachedLogIds) and leaves only filename-safe characters on every OS.
+  private logPath(id: string): string {
+    return join(this.logsDir, `${encodeURIComponent(id)}.json.gz`);
+  }
+
   saveLog(id: string, log: BattleLog): void {
     if (!existsSync(this.logsDir)) mkdirSync(this.logsDir, { recursive: true });
     const gz = gzipSync(Buffer.from(JSON.stringify(log), "utf8"));
-    writeFileSync(join(this.logsDir, `${id}.json.gz`), gz);
+    writeFileSync(this.logPath(id), gz);
   }
 
   getLog(id: string): BattleLog | null {
-    const path = join(this.logsDir, `${id}.json.gz`);
+    const path = this.logPath(id);
     if (!existsSync(path)) return null;
     const gz = readFileSync(path);
     return JSON.parse(gunzipSync(gz).toString("utf8")) as BattleLog;
@@ -172,7 +179,7 @@ export class Store {
 
   /** Delete a cached log if present (used to prune below the final top-N threshold). */
   deleteLog(id: string): void {
-    const path = join(this.logsDir, `${id}.json.gz`);
+    const path = this.logPath(id);
     if (existsSync(path)) rmSync(path);
   }
 
@@ -181,14 +188,14 @@ export class Store {
     if (!existsSync(this.logsDir)) return [];
     return readdirSync(this.logsDir)
       .filter((f) => f.endsWith(".json.gz"))
-      .map((f) => f.slice(0, -".json.gz".length));
+      .map((f) => decodeURIComponent(f.slice(0, -".json.gz".length)));
   }
 
   close(): void {
     // Fold the WAL back into the main db and drop the -wal/-shm sidecars so they
     // don't persist or grow when another process (e.g. the harness) opens the db.
     try {
-      this.db.pragma("wal_checkpoint(TRUNCATE)");
+      this.db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
     } catch {
       // best-effort; a failed checkpoint must not block close
     }

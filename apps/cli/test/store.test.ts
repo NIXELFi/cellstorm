@@ -1,8 +1,10 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { rmSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Store } from "../src/store";
 
-const DB = "/tmp/cellstorm-test.db";
+const DB = join(tmpdir(), "cellstorm-test.db");
 afterEach(() => { try { rmSync(DB); } catch {} try { rmSync(DB + "-logs", { recursive: true }); } catch {} });
 
 describe("Store", () => {
