@@ -18,11 +18,11 @@ export interface PostFxOptions {
   enabled?: boolean;
 }
 
-const ABERRATION_BASE = 0.8; // px at rest
-const ABERRATION_MAX = 3.5; // px at full impact
-const SHAKE_LOGICAL = 2.0; // logical px of shake at full impact (multiplied by scale)
-const OVERSCAN = 0.015; // 1.5% zoom so a few px of shake never exposes the background edge
-const BLOOM_SCALE = 0.35; // bloom intensity at rest — kept low so it's a glow, not a haze
+const ABERRATION_BASE = 0.3; // px at rest (barely there)
+const ABERRATION_MAX = 1.4; // px at full impact
+const SHAKE_LOGICAL = 0.8; // logical px of shake at full impact (multiplied by scale) — gentle nudge
+const OVERSCAN = 0.01; // 1% zoom so the small shake never exposes the background edge
+const BLOOM_SCALE = 0.2; // bloom intensity at rest — a faint glow only
 
 export class PostFx {
   private readonly outer = new Container();
@@ -52,12 +52,12 @@ export class PostFx {
     this.baseY = -app.screen.height * OVERSCAN * 0.5;
     this.shake.position.set(this.baseX, this.baseY);
 
-    // High threshold = only the brightest cores bloom; small blur = a tight glow, not a blur haze.
-    this.bloom = new AdvancedBloomFilter({ threshold: 0.6, bloomScale: BLOOM_SCALE, brightness: 1, blur: 2, quality: 4 });
+    // High threshold = only the brightest cores bloom; tiny blur = a faint glow, never a haze.
+    this.bloom = new AdvancedBloomFilter({ threshold: 0.7, bloomScale: BLOOM_SCALE, brightness: 1, blur: 1.5, quality: 4 });
     this.rgb = new RGBSplitFilter({ red: { x: ABERRATION_BASE, y: 0 }, green: { x: 0, y: 0 }, blue: { x: -ABERRATION_BASE, y: 0 } });
-    this.grade = new AdjustmentFilter({ saturation: 1.12, contrast: 1.08, brightness: 1, gamma: 1 });
-    // CRT filter used purely for its vignette (scanlines / noise / curvature all off).
-    this.vignette = new CRTFilter({ vignetting: 0.3, vignettingAlpha: 1, vignettingBlur: 0.3, lineWidth: 0, lineContrast: 0, noise: 0, curvature: 0 });
+    this.grade = new AdjustmentFilter({ saturation: 1.06, contrast: 1.04, brightness: 1, gamma: 1 });
+    // CRT filter used purely for a faint vignette (scanlines / noise / curvature all off).
+    this.vignette = new CRTFilter({ vignetting: 0.18, vignettingAlpha: 1, vignettingBlur: 0.3, lineWidth: 0, lineContrast: 0, noise: 0, curvature: 0 });
 
     if (this.enabled) this.outer.filters = [this.bloom, this.rgb, this.grade, this.vignette];
   }
@@ -72,8 +72,8 @@ export class PostFx {
     const { dx, dy } = shakeOffset(frame, SHAKE_LOGICAL * this.scale * impact);
     this.shake.position.set(this.baseX + dx, this.baseY + dy);
 
-    this.grade.brightness = 1 + flash * 0.5; // brief pop on the winner reveal
-    this.bloom.bloomScale = BLOOM_SCALE + flash * 0.3;
+    this.grade.brightness = 1 + flash * 0.25; // subtle pop on the winner reveal
+    this.bloom.bloomScale = BLOOM_SCALE + flash * 0.15;
   }
 
   destroy(): void {
