@@ -17,6 +17,12 @@ export interface CosmeticParticle {
   team: number;
 }
 
+export interface SpawnOpts {
+  speed?: number; // base velocity magnitude (default 4)
+  ring?: boolean; // emit evenly around a circle (shockwave) instead of random scatter
+  life?: number; // override particle lifetime
+}
+
 const PARTICLE_LIFE = 16; // ports prototype `life: 16, maxLife: 16`
 
 /**
@@ -34,18 +40,23 @@ export class ParticleField {
     this.cap = cap;
   }
 
-  spawn(x: number, y: number, team: number, n = 5): void {
+  spawn(x: number, y: number, team: number, n = 5, opts?: SpawnOpts): void {
+    const speed = opts?.speed ?? 4;
+    const life = opts?.life ?? PARTICLE_LIFE;
     for (let i = 0; i < n; i++) {
       if (this.particles.length >= this.cap) break;
-      this.particles.push({
-        x,
-        y,
-        vx: (this.prng() - 0.5) * 4,
-        vy: (this.prng() - 0.5) * 4,
-        life: PARTICLE_LIFE,
-        maxLife: PARTICLE_LIFE,
-        team,
-      });
+      let vx: number, vy: number;
+      if (opts?.ring) {
+        // Even radial burst (shockwave). Jitter the speed a touch via the cosmetic PRNG.
+        const a = (i / n) * Math.PI * 2;
+        const sp = speed * (0.85 + this.prng() * 0.3);
+        vx = Math.cos(a) * sp;
+        vy = Math.sin(a) * sp;
+      } else {
+        vx = (this.prng() - 0.5) * speed * 2;
+        vy = (this.prng() - 0.5) * speed * 2;
+      }
+      this.particles.push({ x, y, vx, vy, life, maxLife: life, team });
     }
   }
 

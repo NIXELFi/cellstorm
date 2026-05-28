@@ -11,6 +11,7 @@
 import { Application } from "pixi.js";
 import { makePrng, EventSink, type BattleConfig } from "@cellstorm/sim";
 import { PixiScene } from "./scene";
+import { powerStyle } from "./glyphs";
 import { Hud } from "./hud/compositor";
 import { type HudConfig, DEFAULT_HUD } from "./hud/types";
 import { THEME, type Theme } from "./theme";
@@ -148,11 +149,16 @@ export class BattlePlayer {
     for (let i = this.drainedEvents; i < events.length; i++) {
       const e = events[i]!;
       switch (e.type) {
-        case "death":
-          this.cosmetic.spawn(e.x, e.y, e.team, 5);
+        case "death": {
+          // Death burst styled by the dying team's power: Glasshammer shatters into fast shards.
+          const style = powerStyle(this.config.powers[e.team] ?? "");
+          if (style.death === "shatter") this.cosmetic.spawn(e.x, e.y, e.team, 12, { speed: 7, life: 22 });
+          else this.cosmetic.spawn(e.x, e.y, e.team, 5);
           break;
+        }
         case "explosion":
-          this.cosmetic.spawn(e.x, e.y, e.team, 10);
+          // Bomb: a big even radial shockwave ring.
+          this.cosmetic.spawn(e.x, e.y, e.team, 22, { ring: true, speed: 6, life: 20 });
           break;
         default:
           break;
