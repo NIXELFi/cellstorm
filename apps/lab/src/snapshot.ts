@@ -1,16 +1,16 @@
 import { runBattle, normalizeConfig, type BattleConfigInput } from "@cellstorm/sim";
+import { configIdOf } from "@cellstorm/cli";
 import { LAB_TOTAL_CELLS } from "./roundRobin";
+
+// Re-export the single canonical configId helper from @cellstorm/cli so lab code
+// and tests have one source of truth for the id format.
+export { configIdOf } from "@cellstorm/cli";
 
 export interface SnapshotEntry {
   /** stable id: `${teamCount}:${powers}:${seed}` (matches the cli store) */
   configId: string;
   winner: number;
   durationTicks: number;
-}
-
-/** Stable configId for a battle config (matches @cellstorm/cli store.configId). */
-export function configId(c: { teamCount: number; powers: string[]; seed: number }): string {
-  return `${c.teamCount}:${c.powers.join(",")}:${c.seed}`;
 }
 
 /**
@@ -30,7 +30,7 @@ export function snapshot(configs: BattleConfigInput[]): SnapshotEntry[] {
     });
     const { summary } = runBattle(cfg);
     return {
-      configId: configId(cfg),
+      configId: configIdOf(cfg),
       winner: summary.winner,
       durationTicks: summary.durationTicks,
     };

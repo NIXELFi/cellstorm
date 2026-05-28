@@ -6,7 +6,7 @@ export type { RoundRobinResult } from "./roundRobin";
 export { balanceReport } from "./balance";
 export type { PowerStat, BalanceOptions } from "./balance";
 
-export { snapshot, configId, DEFAULT_SNAPSHOT_CONFIGS } from "./snapshot";
+export { snapshot, configIdOf, DEFAULT_SNAPSHOT_CONFIGS } from "./snapshot";
 export type { SnapshotEntry } from "./snapshot";
 
 export { scoreDiff } from "./scoreDiff";

@@ -1,4 +1,5 @@
 import { score, type ScoreProfile, type BattleLog } from "@cellstorm/score";
+import { configIdOf } from "@cellstorm/cli";
 
 export interface ScoreDiffRow {
   /** index of the log in the input array */
@@ -15,11 +16,6 @@ export interface ScoreDiffRow {
   rankB: number;
   /** rankA - rankB; positive means profile B ranks it higher (better) */
   rankDelta: number;
-}
-
-function logConfigId(log: BattleLog): string {
-  const c = log.config;
-  return `${c.teamCount}:${c.powers.join(",")}:${c.seed}`;
 }
 
 /**
@@ -59,7 +55,7 @@ export function scoreDiff(logs: BattleLog[], a: ScoreProfile, b: ScoreProfile): 
     const rankB = ranksB.get(index)!;
     return {
       index,
-      configId: logConfigId(log),
+      configId: configIdOf(log.config),
       scoreA: ra.score,
       scoreB: rb.score,
       passedA: ra.passed,

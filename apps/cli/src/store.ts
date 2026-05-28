@@ -24,10 +24,9 @@ interface RawRow {
   batchId: string;
 }
 
-/** Stable configId for a battle config. */
-export function configId(c: BattleConfig): string {
-  return `${c.teamCount}:${c.powers.join(",")}:${c.seed}`;
-}
+// Re-export the single source of truth (defined in the node-dep-free configId.ts so the harness
+// can import it browser-safely via the "@cellstorm/cli/config-id" subpath).
+export { configIdOf, configId } from "./configId";
 
 export class Store {
   private db: Database.Database;

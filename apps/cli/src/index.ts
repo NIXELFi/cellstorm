@@ -4,7 +4,7 @@
 
 export { runSweep, runPool, TopNScores } from "./runner";
 export type { SweepJob, PoolWorker } from "./runner";
-export { Store, configId } from "./store";
+export { Store, configId, configIdOf } from "./store";
 export type { ResultRow } from "./store";
 export { expand } from "./sweepSpec";
 export type { SweepSpec, PowerAssignment } from "./sweepSpec";

@@ -5,7 +5,8 @@
   "main": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
-    "./cli": "./src/cli.ts"
+    "./cli": "./src/cli.ts",
+    "./config-id": "./src/configId.ts"
   },
   "scripts": {
     "start": "tsx src/cli.ts"
