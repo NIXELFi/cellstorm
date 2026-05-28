@@ -3,7 +3,10 @@
   "version": "0.1.0",
   "type": "module",
   "main": "./src/index.ts",
-  "exports": { ".": "./src/index.ts" },
+  "exports": {
+    ".": "./src/index.ts",
+    "./hud-config": "./src/hud/types.ts"
+  },
   "dependencies": {
     "@cellstorm/sim": "workspace:*",
     "pixi.js": "^8.0.0"

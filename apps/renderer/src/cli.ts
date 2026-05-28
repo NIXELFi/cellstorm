@@ -1,0 +1,124 @@
+// render CLI:
+//   render --config <configId|inline-json> --db <db> --out <path.mp4> [--hud <json>] [--scale N]
+//          [--maxframes N] [--keep]
+//
+// Loads a BattleConfig (from the SQLite store by id, or inline JSON), renders one PNG per sim tick
+// via Playwright, encodes them to a 60fps MP4 with ffmpeg, and cleans up the temp frames dir.
+
+import { parseArgs } from "node:util";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { normalizeConfig, type BattleConfig } from "@cellstorm/sim";
+// Import the HUD config from the pure (no-Pixi) subpath export rather than the @cellstorm/render
+// package index, whose BattlePlayer re-export pulls in pixi.js (which touches `navigator` at load
+// and throws under Node-side CLI use).
+import { DEFAULT_HUD, type HudConfig } from "@cellstorm/render/hud-config";
+import { Store } from "@cellstorm/cli";
+import { renderBattle, MASTER_WIDTH } from "./renderBattle";
+import { encode } from "./encode";
+
+export interface RenderCliArgs {
+  config?: string;
+  db?: string;
+  out?: string;
+  hud?: string;
+  scale?: string;
+  maxframes?: string;
+  fps?: string;
+  keep?: boolean;
+}
+
+export function parseRenderArgs(argv: string[]): RenderCliArgs {
+  const { values } = parseArgs({
+    args: argv,
+    options: {
+      config: { type: "string" },
+      db: { type: "string" },
+      out: { type: "string" },
+      hud: { type: "string" },
+      scale: { type: "string" },
+      maxframes: { type: "string" },
+      fps: { type: "string" },
+      keep: { type: "boolean" },
+    },
+  });
+  return values as RenderCliArgs;
+}
+
+/**
+ * Resolve the --config argument to a normalized BattleConfig. If it parses as JSON it is treated as
+ * an inline config; otherwise it is looked up in the store by id (which requires --db).
+ */
+export function resolveConfig(configArg: string, db: string | undefined): BattleConfig {
+  const trimmed = configArg.trim();
+  if (trimmed.startsWith("{")) {
+    return normalizeConfig(JSON.parse(trimmed));
+  }
+  if (!db) {
+    throw new Error("--db is required when --config is a config id (not inline JSON)");
+  }
+  const store = new Store(db);
+  const found = store.getConfig(configArg);
+  store.close();
+  if (!found) throw new Error(`config id not found in store: ${configArg}`);
+  return found;
+}
+
+export function resolveHud(hudArg: string | undefined): HudConfig {
+  if (!hudArg) return DEFAULT_HUD;
+  return { ...DEFAULT_HUD, ...JSON.parse(hudArg) };
+}
+
+/** Resolve the output canvas width from --scale (a fraction of the 2160px master, default 1). */
+export function resolveWidth(scaleArg: string | undefined): number {
+  const scale = scaleArg ? Number(scaleArg) : 1;
+  if (!Number.isFinite(scale) || scale <= 0) throw new Error(`--scale must be > 0, got "${scaleArg}"`);
+  return Math.max(2, Math.round(MASTER_WIDTH * scale));
+}
+
+async function main(argv: string[]): Promise<void> {
+  const args = parseRenderArgs(argv);
+  if (!args.config) throw new Error("--config is required (config id or inline JSON)");
+  if (!args.out) throw new Error("--out is required");
+
+  const config = resolveConfig(args.config, args.db);
+  const hud = resolveHud(args.hud);
+  const width = resolveWidth(args.scale);
+  const maxFrames = args.maxframes ? Number(args.maxframes) : undefined;
+  const fps = args.fps ? Number(args.fps) : 60;
+
+  const framesDir = mkdtempSync(join(tmpdir(), "cellstorm-frames-"));
+  process.stdout.write(
+    `Rendering seed=${config.seed} powers=${config.powers.join("/")} width=${width} -> ${args.out}\n`,
+  );
+
+  try {
+    const result = await renderBattle({
+      config,
+      hud,
+      framesDir,
+      width,
+      maxFrames,
+      onProgress: (f) => process.stdout.write(`  ${f} frames captured...\n`),
+    });
+    process.stdout.write(
+      `Captured ${result.frameCount} frames (${result.width}x${result.height}, ended=${result.ended}). Encoding...\n`,
+    );
+    await encode({ framesDir, outPath: args.out, fps });
+    process.stdout.write(`Done: ${args.out}\n`);
+  } finally {
+    if (!args.keep) rmSync(framesDir, { recursive: true, force: true });
+    else process.stdout.write(`Kept frames in ${framesDir}\n`);
+  }
+}
+
+// Run only when invoked directly (not on import), matching @cellstorm/cli's convention.
+const invokedDirectly =
+  process.argv[1] !== undefined && import.meta.url === `file://${process.argv[1]}`;
+if (invokedDirectly) {
+  main(process.argv.slice(2)).catch((err) => {
+    process.stderr.write(`${err instanceof Error ? err.message : String(err)}\n`);
+    process.exit(1);
+  });
+}

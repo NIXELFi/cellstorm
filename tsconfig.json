@@ -5,6 +5,7 @@
     { "path": "./packages/score" },
     { "path": "./packages/render" },
     { "path": "./apps/cli" },
-    { "path": "./apps/harness" }
+    { "path": "./apps/harness" },
+    { "path": "./apps/renderer" }
   ]
 }
