@@ -36,6 +36,7 @@ export class CssHud {
 
   private side!: HTMLElement;
   private scrim!: HTMLElement;
+  private watermark!: HTMLElement;
   private labelsEl!: HTMLElement;
   private rows: TeamRow[] = [];
   private intro!: HTMLElement;
@@ -134,6 +135,11 @@ export class CssHud {
     this.root.classList.add("cs-hud");
     this.root.innerHTML = "";
 
+    // Subtle brand watermark, painted behind everything (first child). Low opacity so it reads as a
+    // ghosted mark, not a label. In the DOM overlay so the canvas post-FX never blurs it.
+    this.watermark = el("div", "cs-watermark");
+    this.watermark.textContent = "CELLSTORM";
+
     // Darkening + blur scrim behind the top strip so the labels stay readable over the battle;
     // gradients/fades down into the action.
     this.scrim = el("div", "cs-topscrim");
@@ -202,8 +208,8 @@ export class CssHud {
     this.winnerEl.appendChild(wcard);
     this.winnerEl.style.display = "none";
 
-    // Scrim first so it sits behind the strip.
-    this.root.append(this.scrim, this.side, this.intro, this.winnerEl);
+    // Watermark first (furthest back), then scrim behind the strip, then everything else.
+    this.root.append(this.watermark, this.scrim, this.side, this.intro, this.winnerEl);
   }
 
   private fillWinner(winner: number, survivors: number): void {
@@ -266,6 +272,13 @@ const CSS = `
   container-type: size;
 }
 /* sizes scale with the canvas via cqh (container query height) so it works at preview AND 4K */
+/* subtle brand watermark — ghosted Anton wordmark, bottom-centered, behind the action */
+.cs-watermark {
+  position: absolute; left: 0; right: 0; bottom: 3cqh; text-align: center;
+  font-family: var(--display); text-transform: uppercase;
+  font-size: 2cqh; letter-spacing: 0.62em; text-indent: 0.62em;
+  color: rgba(255,255,255,0.085); text-shadow: 0 0.2cqh 0.8cqh rgba(0,0,0,0.3);
+}
 .cs-topscrim {
   position: absolute; top: 0; left: 0; right: 0; height: 13cqh;
   background: linear-gradient(to bottom,

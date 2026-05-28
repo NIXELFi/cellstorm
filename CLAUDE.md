@@ -16,6 +16,7 @@ top ~1%, render those. Design docs live in `docs/superpowers/` (spec + plan).
 packages/
   sim/      @cellstorm/sim    — pure deterministic engine (NO DOM/render deps)
   score/    @cellstorm/score  — BattleLog -> DramaReport (gates + weighted components)
+  audio/    @cellstorm/audio  — pure: BattleLog -> AudioScore -> synthesized PCM/WAV (no DOM/Node)
   render/   @cellstorm/render — PixiJS scene + CSS HUD + BattlePlayer (shared by harness & renderer)
 apps/
   cli/      @cellstorm/cli    — sweep engine + SQLite store (also a library: Store, runSweep, expand)
@@ -33,9 +34,11 @@ in-harness/in-renderer stepping. This is what makes "score then render" valid.
 - **No `Math.random` / `Date.now` / `performance.now` / `requestAnimationFrame`-timing in
   `packages/sim/src`.** All gameplay randomness comes from one seeded `mulberry32` PRNG in the
   `World` (`prng.ts`), seeded from `config.seed`. Fixed timestep; nothing reads wall-clock.
-- **Two RNG streams:** the *gameplay* stream lives in the sim; the *cosmetic* stream (particles/FX)
-  is owned by the renderer/player, seeded `config.seed ^ COSMETIC_SALT`. Visual tweaks must never
-  perturb gameplay → scoring is immune to visual changes.
+- **Three RNG streams:** the *gameplay* stream lives in the sim; the *cosmetic* stream (particles/FX)
+  is owned by the renderer/player, seeded `config.seed ^ COSMETIC_SALT`; the *audio* stream lives in
+  `@cellstorm/audio`, seeded `config.seed ^ AUDIO_SALT`. Visual/audio tweaks must never perturb
+  gameplay → scoring is immune to them. Audio is a pure *consumer* of the BattleLog; it cannot
+  affect the sim.
 - CI gates: `packages/sim/test/determinism.test.ts` (two runs identical) and
   `packages/render/test/playerSim.test.ts` (player stepping == headless runBattle).
 - The HUD animates from the **deterministic tick**, not CSS time — the renderer is wall-clock-
@@ -60,8 +63,10 @@ CELLSTORM_DB="$HOME/Developer/cellstorm/data/cellstorm.db" pnpm harness
 # Headless sweep (also runnable from the harness UI "Start sweep"):
 pnpm --filter @cellstorm/cli start sweep --db <ABS_PATH> --teams 4 --powers random --seeds 0-200 --batch v1 --concurrency 4 --topn 40
 
-# Render one MP4 (the harness "Render video" button does this via the bridge):
-pnpm --filter @cellstorm/renderer exec tsx src/cli.ts --config <configId|inlineJSON> --db <db> --out out.mp4 --scale 0.5 [--hud '<json>']
+# Render one MP4 (the harness "Render video" button does this via the bridge). Sound is muxed in by
+# default; pass --mute for a silent render. NOTE: --scale must yield EVEN width AND height (libx264
+# + yuv420p reject odd dimensions) — 0.25 -> 540x960 and 0.5 -> 1080x1920 are safe; 0.18 -> 389 is not.
+pnpm --filter @cellstorm/renderer exec tsx src/cli.ts --config <configId|inlineJSON> --db <db> --out out.mp4 --scale 0.5 [--hud '<json>'] [--mute]
 
 # Dev lab:
 pnpm --filter @cellstorm/lab lab {roundrobin|balance|snapshot|scorediff}
@@ -133,8 +138,47 @@ studies (see the `apps/lab/*.mts` scripts; rebuild similar ones to re-tune).
   triangle=aggressive/fast, diamond=burst/ranged, hexagon=control, circle=sustain — `glyphs.ts`).
   Glow layer + state FX (charger dash trail, plague tint, stun dim, frenzy heat, heal/shield halos)
   + styled death bursts (Glasshammer shatter, Bomb shockwave). Random per-team spawn locations.
+- **Post-FX (`postfx.ts` + `postfxLogic.ts`):** a filter stack (`pixi-filters`) wraps the scene in the
+  player — neon **bloom**, soft **vignette** (a `CRTFilter` with only vignetting on), **color grade**
+  (`AdjustmentFilter`), plus **chromatic aberration** + a small **screen shake** that swell on
+  explosions/deaths and a brief brightness/bloom **pop on the winner reveal**. Cosmetic only (reads no
+  gameplay RNG). Tasteful/minimal but visible. Applied to the Pixi canvas only — the CSS HUD stays
+  crisp on top. The shake lives on an inner container (vignette stays screen-fixed) with a 1.5%
+  overscan so it never exposes the border. ALL reactive uniforms are driven from the **sim tick** (the
+  `impact` envelope + winner flash), never wall-clock — so the FX render identically in the headless
+  renderer instead of freezing. The reactive math is pure + unit-tested in `postfxLogic.ts`.
 
 ---
+
+## Audio (`@cellstorm/audio`)
+Sound is a **separate track muxed by ffmpeg**, not played live — the renderer is wall-clock-decoupled
+(steps + screenshots), so nothing can "play" during capture. The package is pure (no DOM/Pixi/Node),
+so the SAME code makes the WAV the renderer muxes AND the PCM the harness plays via Web Audio →
+audio is WYSIWYG like the visuals. Pipeline: `BattleLog -> buildAudioScore() -> renderScore() (stereo
+Float32 PCM) -> pcmToWav()`. No samples — everything is synthesized (oscillators + analytic envelopes).
+- **Always-consonant by construction — and STATIC (no rotation):** the root + tempo come from
+  `config.seed`, but the harmony is fixed for the whole battle: one **major-pentatonic** scale (every
+  note mutually consonant) over one sustained **major-6 backing chord** (`music.ts`). Each team owns
+  **one permanent pentatonic note** (`Voice.degree`, never changes) with a **soft, sine-based** archetype
+  timbre (mirrors `render/glyphs.ts`: tank/sustain→sine, aggressive→`boop`, burst→bell, control→triangle
+  — no raw square/saw/pulse, no piano). A team still sounds like it looks, gently.
+- **Event mapping (`score.ts`):** death = the team's one fixed note (NO octave climb, NO rotation),
+  panned by x; explosion = low boom + faint crack; projectileFire = quiet high blip; leadChange =
+  ascending arpeggio of the fixed chord (identical every time); battleEnd = resolving block chord (pad)
+  + ascending arpeggio (skipped on a stalemate).
+- **Musical bed:** the single fixed chord, sustained as a soft pad + low root bass, re-voiced each bar
+  so its **volume swells with on-screen action density** (a deaths/sec envelope) — but the pitches never
+  change. A gentle `boop` sparkle is added only when the action is hot.
+- **Synth (`synth.ts`):** soft, sine-based timbres (short, rolled-off harmonic sums) + gentle envelopes,
+  a one-pole ~6kHz high-cut, and a real **brick-wall peak limiter** (instant attack / ~80ms release,
+  ceiling 0.8) that GUARANTEES the output never approaches full scale — it cannot hard-clip even with
+  many teams stacking events (a unit test pins this; verified ~−1.7 dBFS on a 5-team render).
+- **Renderer:** `cli.ts` re-sims via `runBattle(config)` (deterministic, matches the captured frames)
+  to get the log, writes `audio.wav` to the temp frames dir, and `encode()` muxes it
+  (`ffmpegArgs(..., audioPath)` adds `-i audio.wav -c:a aac -b:a 192k -shortest`). `--mute` skips it.
+- **Harness:** a **"Sound" toggle** plays the same synthesized buffer through Web Audio, started in
+  lockstep with playback. Synced **only at 1× from the current frame**; scrubbing / speed≠1 / pause
+  stop it (the MP4 is the real fidelity check). Decision rules: `ui/previewAudioLogic.ts` (unit-tested).
 
 ## Gotchas / hard-won lessons
 - **Verify `pnpm typecheck` exits 0 BEFORE committing** (and run `pnpm test`). A type error was
@@ -162,12 +206,13 @@ studies (see the `apps/lab/*.mts` scripts; rebuild similar ones to re-tune).
 ---
 
 ## Status / possible next steps
-V1 is built and on `main` (merged from `feat/cellstorm-v1`), 127 tests green. The renderer produces
-real 1080×1920 60fps MP4s with the full broadcast HUD baked in. Open follow-ups discussed but not
-built: the **flash-forward-to-climax intro hook** (highest-leverage retention move; the climax
-primitive exists in `logLogic.climaxTick`), kiting AI for ranged powers, a render resolution toggle
-(1080/4K) + faster capture (CDP screencast), audio/music-sync (phase 2 — the event log already
-carries timestamps), and an end-to-end integration test for the harness→bridge→render flow.
+V1 is built and on `main` (merged from `feat/cellstorm-v1`). The renderer produces real 1080×1920
+60fps MP4s with the full broadcast HUD baked in **and a synthesized soundtrack** (see Audio above;
+on `feat/cellstorm-audio`, 173 tests green). Open follow-ups discussed but not built: the
+**flash-forward-to-climax intro hook** (highest-leverage retention move; the climax primitive exists
+in `logLogic.climaxTick`), kiting AI for ranged powers, a render resolution toggle (1080/4K) + faster
+capture (CDP screencast), and an end-to-end integration test for the harness→bridge→render flow.
+Audio follow-ups: richer per-power leitmotifs, sidechain/ducking, and a stereo-width pass.
 
 ## Conventions
 - End git commit messages with: `Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>`

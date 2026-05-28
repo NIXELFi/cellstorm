@@ -27,4 +27,24 @@ describe("ffmpegArgs", () => {
     const args = ffmpegArgs("/x/y", 60, "z.mp4");
     expect(args).toContain("/x/y/%06d.png");
   });
+
+  it("omits any audio input when no audio path is given", () => {
+    const args = ffmpegArgs("/tmp/frames", 60, "out.mp4");
+    expect(args).not.toContain("-c:a");
+    expect(args.filter((a) => a === "-i")).toHaveLength(1); // only the frame sequence
+  });
+
+  it("adds the audio track as a second input with aac + -shortest when given", () => {
+    const args = ffmpegArgs("/tmp/frames", 60, "out.mp4", "/tmp/frames/audio.wav");
+    // both inputs present, audio after video
+    const inputs = args.reduce<string[]>((acc, a, i) => (a === "-i" ? [...acc, args[i + 1]!] : acc), []);
+    expect(inputs).toEqual(["/tmp/frames/%06d.png", "/tmp/frames/audio.wav"]);
+    expect(args).toContain("-c:a");
+    expect(args[args.indexOf("-c:a") + 1]).toBe("aac");
+    expect(args).toContain("-shortest");
+    // video codec still libx264
+    expect(args).toContain("libx264");
+    // output path is last
+    expect(args[args.length - 1]).toBe("out.mp4");
+  });
 });

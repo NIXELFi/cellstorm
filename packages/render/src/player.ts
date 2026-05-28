@@ -17,6 +17,11 @@ import { type HudConfig, DEFAULT_HUD } from "./hud/types";
 import { THEME, type Theme } from "./theme";
 import { ParticleField } from "./fx";
 import { startSim, advance, seekState, countsOf, type SimState } from "./simCore";
+import { PostFx } from "./postfx";
+import { impactFromEvents, decayImpact, winnerFlash } from "./postfxLogic";
+
+const IMPACT_DECAY = 0.86; // per-tick decay of the screen-shake / aberration impact envelope
+const FLASH_SEC = 0.5; // winner-reveal flash duration
 
 /** Cosmetic PRNG salt: keeps the FX stream disjoint from the gameplay stream. */
 export const COSMETIC_SALT = 0x9e3779b9;
@@ -39,6 +44,8 @@ export class BattlePlayer {
   private readonly scene: PixiScene;
   private readonly hud?: CssHud;
   private cosmetic: ParticleField;
+  private readonly postfx: PostFx;
+  private impact = 0; // 0..1 screen-shake / aberration envelope, decays each tick
   private state: SimState;
   private sink: EventSink;
   private drainedEvents = 0;
@@ -58,6 +65,9 @@ export class BattlePlayer {
 
     this.cosmetic = new ParticleField(this.cosmeticPrng());
     this.scene = new PixiScene(app, { arena: this.config.arena, scale: this.scale, theme: this.theme });
+    // Post-FX wraps the scene (bloom/vignette/grade + impact-reactive aberration & shake). Cosmetic
+    // only; reads nothing from gameplay RNG.
+    this.postfx = new PostFx(app, this.scene.root, { scale: this.scale });
     if (opts.hudRoot) {
       this.hud = new CssHud(opts.hudRoot, opts.hud ?? DEFAULT_HUD, this.config.powers, this.theme);
     }
@@ -69,7 +79,11 @@ export class BattlePlayer {
   stepFrame(): boolean {
     if (!this.state.ended) {
       advance(this.state, this.sink);
+      const newEvents = this.sink.events.slice(this.drainedEvents);
       this.drainNewEvents();
+      this.impact = decayImpact(this.impact, impactFromEvents(newEvents), IMPACT_DECAY);
+    } else {
+      this.impact = decayImpact(this.impact, 0, IMPACT_DECAY);
     }
     this.cosmetic.advance();
     this.render();
@@ -87,6 +101,7 @@ export class BattlePlayer {
     this.sink = fresh.sink;
     this.drainedEvents = this.sink.events.length; // skip replaying historical FX bursts
     this.cosmetic = new ParticleField(this.cosmeticPrng());
+    this.impact = 0; // shake/aberration history isn't reconstructed on a scrub
     this.render();
   }
 
@@ -132,6 +147,7 @@ export class BattlePlayer {
   }
 
   destroy(): void {
+    this.postfx.destroy();
     this.scene.destroy();
     this.hud?.destroy();
     this.cosmetic.clear();
@@ -169,5 +185,8 @@ export class BattlePlayer {
   private render(): void {
     this.scene.draw(this.state.world, this.cosmetic);
     this.hud?.update(countsOf(this.state.world), this.state.world.frame, this.state.world.winner);
+    const w = this.state.world;
+    const flash = winnerFlash(w.frame, w.resolvedFrame, 60, FLASH_SEC);
+    this.postfx.update(w.frame, this.impact, flash);
   }
 }
