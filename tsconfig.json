@@ -6,6 +6,7 @@
     { "path": "./packages/render" },
     { "path": "./apps/cli" },
     { "path": "./apps/harness" },
-    { "path": "./apps/renderer" }
+    { "path": "./apps/renderer" },
+    { "path": "./apps/lab" }
   ]
 }

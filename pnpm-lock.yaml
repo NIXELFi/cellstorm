@@ -65,6 +65,19 @@ importers:
         specifier: ^5.4.0
         version: 5.4.21(@types/node@22.19.19)
 
+  apps/lab:
+    dependencies:
+      '@cellstorm/score':
+        specifier: workspace:*
+        version: link:../../packages/score
+      '@cellstorm/sim':
+        specifier: workspace:*
+        version: link:../../packages/sim
+    devDependencies:
+      tsx:
+        specifier: ^4.19.0
+        version: 4.22.3
+
   apps/renderer:
     dependencies:
       '@cellstorm/cli':

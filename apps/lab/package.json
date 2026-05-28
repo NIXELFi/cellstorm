@@ -1,0 +1,20 @@
+{
+  "name": "@cellstorm/lab",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./cli": "./src/cli.ts"
+  },
+  "scripts": {
+    "lab": "tsx src/cli.ts"
+  },
+  "dependencies": {
+    "@cellstorm/sim": "workspace:*",
+    "@cellstorm/score": "workspace:*"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0"
+  }
+}
