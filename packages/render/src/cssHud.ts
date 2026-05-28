@@ -22,7 +22,8 @@ function hex(n: number): string {
 }
 
 interface TeamRow {
-  card: HTMLElement;
+  seg: HTMLElement; // proportional bar segment
+  label: HTMLElement;
   countEl: HTMLElement;
   display: number; // eased counter value
 }
@@ -73,8 +74,11 @@ export class CssHud {
       row.display = easeCounter(row.display, target);
       row.countEl.textContent = String(Math.round(row.display));
       const dead = target <= 0;
-      row.card.classList.toggle("cs-dead", dead);
-      row.card.classList.toggle("cs-lead", !dead && t === lead && winner < 0);
+      // Segment width = share of living cells (driven by the eased value per tick).
+      row.seg.style.flexGrow = String(Math.max(0, row.display));
+      row.seg.classList.toggle("dead", dead);
+      row.label.classList.toggle("dead", dead);
+      row.label.classList.toggle("lead", !dead && t === lead && winner < 0);
     }
 
     // Intro fade (tick-driven). The side scoreboard fades IN as the intro fades out, so the two
@@ -114,25 +118,30 @@ export class CssHud {
     this.root.classList.add("cs-hud");
     this.root.innerHTML = "";
 
-    // Side scoreboard (top): one card per team.
+    // Side display (top): a slim proportional strip — each team a segment sized by its share of
+    // living cells (shrinks as it dies) — plus a tiny name+count label row. Minimal, out of the way.
     this.side = el("div", "cs-side");
+    const pbar = el("div", "cs-pbar");
+    const labels = el("div", "cs-labels");
     this.powers.forEach((power, t) => {
       const color = this.teamColor(t);
-      const card = el("div", "cs-card");
-      card.style.setProperty("--c", color);
-      const bar = el("div", "cs-bar");
-      const mid = el("div", "cs-mid");
-      const name = el("div", "cs-name");
+      const seg = el("div", "cs-seg");
+      seg.style.setProperty("--c", color);
+      pbar.appendChild(seg);
+
+      const label = el("div", "cs-lab");
+      label.style.setProperty("--c", color);
+      const dot = el("span", "cs-lab-dot");
+      const name = el("span", "cs-lab-name");
       name.textContent = power;
-      const desc = el("div", "cs-desc");
-      desc.textContent = powerDesc(power);
-      mid.append(name, desc);
-      const count = el("div", "cs-count");
+      const count = el("span", "cs-lab-count");
       count.textContent = "0";
-      card.append(bar, mid, count);
-      this.side.appendChild(card);
-      this.rows.push({ card, countEl: count, display: 0 });
+      label.append(dot, name, count);
+      labels.appendChild(label);
+
+      this.rows.push({ seg, label, countEl: count, display: 0 });
     });
+    this.side.append(pbar, labels);
 
     // Intro overlay (centered explainer).
     this.intro = el("div", "cs-intro");
@@ -236,32 +245,28 @@ const CSS = `
 }
 /* sizes scale with the canvas via cqh (container query height) so it works at preview AND 4K */
 .cs-side {
-  position: absolute; top: 1.6cqh; left: 1.8cqh; width: 46cqw;
-  display: flex; flex-direction: column; gap: 0.6cqh;
+  position: absolute; top: 1.8cqh; left: 2cqh; right: 2cqh;
+  display: flex; flex-direction: column; gap: 0.9cqh;
 }
-.cs-card {
-  display: flex; align-items: center; gap: 0.9cqh;
-  padding: 0.6cqh 0.9cqh; border-radius: 0.9cqh;
-  background: linear-gradient(135deg, rgba(14,11,22,0.66), rgba(14,11,22,0.36));
-  border: 0.12cqh solid color-mix(in srgb, var(--c) 32%, transparent);
-  box-shadow: 0 0.3cqh 1cqh rgba(0,0,0,0.4);
-  backdrop-filter: blur(5px);
-  transition: opacity .25s ease, filter .25s ease;
+.cs-pbar {
+  display: flex; gap: 0.45cqh; height: 1.25cqh;
 }
-.cs-card.cs-lead { border-color: color-mix(in srgb, var(--c) 75%, transparent);
-  box-shadow: 0 0.3cqh 1.2cqh rgba(0,0,0,0.45), 0 0 1.2cqh color-mix(in srgb, var(--c) 40%, transparent); }
-.cs-card.cs-dead { opacity: .26; filter: grayscale(0.7); }
-.cs-bar { width: 0.4cqh; align-self: stretch; border-radius: 1cqh; background: var(--c);
-  box-shadow: 0 0 0.7cqh var(--c); }
-.cs-mid { flex: 1; min-width: 0; }
-.cs-name { font-weight: 700; font-size: 1.45cqh; letter-spacing: 0.05em; text-transform: uppercase;
-  color: var(--c); line-height: 1.1; text-shadow: 0 0 0.7cqh color-mix(in srgb, var(--c) 45%, transparent); }
-.cs-dead .cs-name { text-decoration: line-through; }
-.cs-desc { font-size: 1.0cqh; font-weight: 500; color: rgba(232,232,236,0.62); margin-top: 0.15cqh;
-  letter-spacing: 0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.cs-count { font-family: var(--display); font-size: 2.7cqh; line-height: 0.9; color: #fff;
-  font-variant-numeric: tabular-nums; text-shadow: 0 0 1cqh color-mix(in srgb, var(--c) 55%, transparent);
-  min-width: 3ch; text-align: right; }
+.cs-seg {
+  background: var(--c); border-radius: 1cqh; min-width: 0;
+  box-shadow: 0 0 0.8cqh color-mix(in srgb, var(--c) 55%, transparent);
+}
+.cs-seg:not(.dead) { min-width: 1.4cqw; }
+.cs-seg.dead { opacity: 0; }
+.cs-labels { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.4cqh 1.6cqh; }
+.cs-lab { display: flex; align-items: baseline; gap: 0.5cqh; }
+.cs-lab-dot { width: 0.95cqh; height: 0.95cqh; border-radius: 50%; background: var(--c);
+  align-self: center; box-shadow: 0 0 0.7cqh var(--c); }
+.cs-lab-name { font-weight: 700; font-size: 1.4cqh; letter-spacing: 0.05em; text-transform: uppercase;
+  color: var(--c); text-shadow: 0 0 0.7cqh color-mix(in srgb, var(--c) 40%, transparent); }
+.cs-lab-count { font-family: var(--display); font-size: 1.95cqh; color: #fff; font-variant-numeric: tabular-nums; }
+.cs-lab.dead { opacity: 0.32; }
+.cs-lab.dead .cs-lab-name { text-decoration: line-through; }
+.cs-lab.lead .cs-lab-dot { box-shadow: 0 0 1.6cqh var(--c); }
 
 .cs-intro {
   position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
