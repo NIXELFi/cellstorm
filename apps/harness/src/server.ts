@@ -396,9 +396,10 @@ const renders = new Map<string, RenderProgress>();
 
 /**
  * Render one candidate to an MP4 via the renderer CLI (Playwright frame capture + ffmpeg), then
- * reveal it in the OS file manager and open it for playback. Defaults to a 1080-wide (Shorts) render
- * for speed; pass scale=1 for full 2160px. Progress (total frames, frames captured, encode phase) is
- * parsed from the CLI's stdout into a RenderProgress the harness polls to drive its progress bar/ETA.
+ * reveal it in the OS file manager and open it for playback. Defaults to a full 4K (2160px) render —
+ * 1080 looks bad after YouTube's re-encode; pass a smaller scale for a fast preview. Progress (total
+ * frames, frames captured, encode phase) is parsed from the CLI's stdout into a RenderProgress the
+ * harness polls to drive its progress bar/ETA.
  */
 function startRender(config: BattleConfig, hud: unknown, scale?: number): { renderId: string; out: string } {
   const repoRoot = resolve(__dirname, "..", "..", "..");
@@ -411,7 +412,7 @@ function startRender(config: BattleConfig, hud: unknown, scale?: number): { rend
   const cliEntry = resolve(__dirname, "..", "..", "renderer", "src", "cli.ts");
   const args = nodeTsxArgs([
     cliEntry, "--config", JSON.stringify(config), "--out", out,
-    "--scale", String(scale && scale > 0 ? scale : 0.5),
+    "--scale", String(scale && scale > 0 ? scale : 1),
   ]);
   if (hud) args.push("--hud", JSON.stringify(hud));
 

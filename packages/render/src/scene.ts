@@ -11,9 +11,11 @@
 import { Application, Container, Graphics } from "pixi.js";
 import type { ArenaParams, World } from "@cellstorm/sim";
 import { THEME, type Theme } from "./theme";
-import type { ParticleField } from "./fx";
-import { addShape, powerStyle, type PowerStyle } from "./glyphs";
+import { type ParticleField, type FlashField, flashVisual, BURST_TUNING, FLASH_TUNING } from "./fx";
+import { powerStyle, type PowerStyle } from "./glyphs";
 import { ACTION_ZOOM, actionTransform } from "./safeArea";
+import { TRAIL_TUNING, trailQuads } from "./trail";
+import { CLASH_TUNING } from "./clash";
 
 const HEAL = 0x6ef0a0;
 const POISON = 0x7fe04a;
@@ -29,11 +31,14 @@ export interface SceneOptions {
 export class PixiScene {
   readonly root = new Container();
   private readonly trail = new Graphics();
+  private readonly streakLayer = new Graphics();
   private readonly glowLayer = new Graphics();
   private readonly cellLayer = new Graphics();
   private readonly projLayer = new Graphics();
   private readonly fxLayer = new Graphics();
   private readonly particleLayer = new Graphics();
+  private readonly flashLayer = new Graphics();
+  private readonly sparkLayer = new Graphics();
   private readonly arena: ArenaParams;
   private readonly scale: number;
   private readonly theme: Theme;
@@ -43,9 +48,14 @@ export class PixiScene {
     this.arena = opts.arena;
     this.scale = opts.scale;
     this.theme = opts.theme ?? THEME;
-    // Draw order: trails -> glow -> cells -> projectiles -> state FX -> particles (top).
+    // Draw order (bottom -> top): background -> motion streaks -> glow -> cells -> projectiles ->
+    // state FX -> particles (white-hot bursts) -> kill-flash rings -> clash sparks. The streak layer
+    // sits above the background but BELOW the cells so each cell rides the head of its own trail;
+    // flashes + sparks sit on top so they read brightest and the bloom post-FX amplifies them. All
+    // layers live inside the scene container, so the bloom post-FX makes them glow.
     this.root.addChild(
-      this.trail, this.glowLayer, this.cellLayer, this.projLayer, this.fxLayer, this.particleLayer,
+      this.trail, this.streakLayer, this.glowLayer, this.cellLayer, this.projLayer, this.fxLayer,
+      this.particleLayer, this.flashLayer, this.sparkLayer,
     );
     app.stage.addChild(this.root);
     // Off-by-default render-side inward scale so the meaningful action stays inside the safe zone.
@@ -61,7 +71,7 @@ export class PixiScene {
       .fill({ color: this.theme.background, alpha: 1 });
   }
 
-  draw(world: World, particles?: ParticleField): void {
+  draw(world: World, particles?: ParticleField, flashes?: FlashField, sparks?: ParticleField): void {
     const s = this.scale;
     const W = this.arena.width * s;
     const H = this.arena.height * s;
@@ -74,28 +84,48 @@ export class PixiScene {
     this.trail.clear();
     this.trail.rect(0, 0, W, H).fill({ color: this.theme.background, alpha: 0.5 });
 
-    // Glow layer: a larger faint shape under each cell (cheap bloom), batched per team.
+    // Motion streaks: a tapered, team-colored comet behind each MOVING cell, opposite its velocity.
+    // Faster cells get a longer/brighter streak; stationary cells get none. Batched per (team, segment)
+    // so each fill covers many cells: the per-segment alpha is constant (representative), while the
+    // per-cell trail LENGTH carries the speed differences. Sits below the cells (cell rides the head).
+    this.streakLayer.clear();
+    const segs = TRAIL_TUNING.segments;
+    for (let t = 0; t < teamCount; t++) {
+      for (let k = 0; k < segs; k++) {
+        let any = false;
+        let segAlpha = 0;
+        for (const c of world.cells) {
+          if (!c.alive || c.team !== t) continue;
+          const tr = trailQuads(c.x, c.y, c.vx, c.vy, this.cellR(c) * TRAIL_TUNING.headWidthFrac, s);
+          if (!tr) continue;
+          this.streakLayer.poly(tr.quads[k]!);
+          segAlpha = tr.alphas[k]!; // per-segment alpha is independent of the cell; last wins, all equal
+          any = true;
+        }
+        if (any) this.streakLayer.fill({ color: this.teamColor(t), alpha: segAlpha });
+      }
+    }
+
+    // Glow layer: a larger faint disc under each cell (cheap neon bloom), batched per team.
     this.glowLayer.clear();
     for (let t = 0; t < teamCount; t++) {
-      const shape = this.styles[t]!.shape;
       let any = false;
       for (const c of world.cells) {
         if (!c.alive || c.team !== t) continue;
-        addShape(this.glowLayer, shape, c.x * s, c.y * s, this.cellR(c) * s * 2.1);
+        this.glowLayer.circle(c.x * s, c.y * s, this.cellR(c) * s * 2.1);
         any = true;
       }
       if (any) this.glowLayer.fill({ color: this.teamColor(t), alpha: 0.14 });
     }
 
-    // Cell layer: shape per team power, filled in team color with a crisp dark outline so
-    // individual shapes stay legible inside same-color blobs. Batched per team.
+    // Cell layer: every cell is a flat 2D circle in team color with a crisp dark outline so
+    // individual cells stay legible inside same-color blobs. Batched per team.
     this.cellLayer.clear();
     for (let t = 0; t < teamCount; t++) {
-      const shape = this.styles[t]!.shape;
       let any = false;
       for (const c of world.cells) {
         if (!c.alive || c.team !== t) continue;
-        addShape(this.cellLayer, shape, c.x * s, c.y * s, this.cellR(c) * s);
+        this.cellLayer.circle(c.x * s, c.y * s, this.cellR(c) * s);
         any = true;
       }
       if (any) {
@@ -159,13 +189,56 @@ export class PixiScene {
       }
     }
 
-    // Cosmetic particles on top: team-tinted, alpha by remaining life.
+    // Cosmetic particles: team-tinted body, alpha by remaining life, with a WHITE-HOT core for
+    // fresh particles that fades to pure team color as they age (punchier kill feedback).
     this.particleLayer.clear();
     if (particles) {
+      const baseR = BURST_TUNING.size * s;
+      const coreR = baseR * BURST_TUNING.coreScale;
       for (const pt of particles.particles) {
-        this.particleLayer
-          .circle(pt.x * s, pt.y * s, 1.8 * s)
-          .fill({ color: this.teamColor(pt.team), alpha: pt.life / pt.maxLife });
+        const lifeFrac = pt.life / pt.maxLife;
+        const px = pt.x * s, py = pt.y * s;
+        this.particleLayer.circle(px, py, baseR).fill({ color: this.teamColor(pt.team), alpha: lifeFrac });
+        // White-hot core while the particle is fresh; its alpha ramps down within the core window.
+        if (lifeFrac >= BURST_TUNING.coreFrac) {
+          const coreA = (lifeFrac - BURST_TUNING.coreFrac) / (1 - BURST_TUNING.coreFrac);
+          this.particleLayer.circle(px, py, coreR).fill({ color: WHITE, alpha: coreA });
+        }
+      }
+    }
+
+    // Kill-flash pass: an expanding ring + brief center pop. Color starts near-white and resolves
+    // toward the team color over the flash's life; radius grows + alpha fades (pure helper).
+    this.flashLayer.clear();
+    if (flashes) {
+      for (const f of flashes.flashes) {
+        const { radius, alpha } = flashVisual(f.life, f.maxLife, f.big);
+        if (alpha <= 0) continue;
+        const fx = f.x * s, fy = f.y * s;
+        const tune = f.big ? FLASH_TUNING.explosion : FLASH_TUNING.death;
+        const ageT = 1 - alpha; // 0 fresh -> 1 dying; whiter when fresh, team color as it ages
+        const ringColor = this.lerpColor(WHITE, this.teamColor(f.team), ageT);
+        this.flashLayer
+          .circle(fx, fy, radius * s)
+          .stroke({ width: tune.ringWidth * s, color: ringColor, alpha });
+        // Brief bright center "pop" early in the flash's life (fades fast).
+        const coreA = tune.coreAlpha * alpha * alpha;
+        if (coreA > 0) {
+          this.flashLayer.circle(fx, fy, tune.radiusStart * s).fill({ color: WHITE, alpha: coreA });
+        }
+      }
+    }
+
+    // Impact sparks at clash fronts (top): bright white-hot cores with a faint hot halo so they read
+    // as energetic clashes distinct from team-tinted particles, and feed the bloom post-FX.
+    this.sparkLayer.clear();
+    if (sparks) {
+      const core = CLASH_TUNING.sparkSize;
+      for (const sp of sparks.particles) {
+        const a = sp.life / sp.maxLife;
+        const px = sp.x * s, py = sp.y * s;
+        this.sparkLayer.circle(px, py, core * 1.8 * s).fill({ color: HOT, alpha: 0.35 * a });
+        this.sparkLayer.circle(px, py, core * s).fill({ color: WHITE, alpha: a });
       }
     }
   }
@@ -177,6 +250,17 @@ export class PixiScene {
   private cellR(c: { radius: number; hp: number; maxHp: number }): number {
     // A touch larger than the prototype so shapes read, without dominating.
     return c.radius * (0.62 + 0.45 * (c.hp / c.maxHp)) * 1.15;
+  }
+
+  /** Linear-interpolate between two hex colors by t (0..1). Used to resolve white -> team. */
+  private lerpColor(a: number, b: number, t: number): number {
+    const k = Math.min(1, Math.max(0, t));
+    const ar = (a >> 16) & 0xff, ag = (a >> 8) & 0xff, ab = a & 0xff;
+    const br = (b >> 16) & 0xff, bg = (b >> 8) & 0xff, bb = b & 0xff;
+    const r = Math.round(ar + (br - ar) * k);
+    const g = Math.round(ag + (bg - ag) * k);
+    const bl = Math.round(ab + (bb - ab) * k);
+    return (r << 16) | (g << 8) | bl;
   }
 
   /** Darken a hex color toward black by factor f (0..1) — used for crisp cell outlines. */

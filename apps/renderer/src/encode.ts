@@ -5,6 +5,23 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import ffmpegStatic from "ffmpeg-static";
 
+// Encode-quality defaults: a clean, high-quality H.264 source so YouTube's re-encode doesn't mush
+// the fine particles/glow/motion. CRF 18 ≈ visually lossless; "high" profile + yuv420p stay broadly
+// playable. Tunable per call.
+export const CRF_DEFAULT = 18;
+export const PRESET_DEFAULT = "medium";
+
+/** Optional video-quality knobs for the encode. */
+export interface VideoOpts {
+  /** Downscale target width (e.g. supersampled frames -> output). Adds a Lanczos scale filter. */
+  scaleW?: number;
+  scaleH?: number;
+  /** H.264 constant rate factor (lower = higher quality/bigger). Defaults to CRF_DEFAULT. */
+  crf?: number;
+  /** x264 preset (speed/size tradeoff). Defaults to PRESET_DEFAULT. */
+  preset?: string;
+}
+
 /**
  * Resolve the ffmpeg binary. An explicit path wins; otherwise prefer the bundled `ffmpeg-static`
  * binary (a real ffmpeg shipped per-platform via npm — no system install or PATH setup, so renders
@@ -34,13 +51,27 @@ export function ffmpegArgs(
   outPath: string,
   audioPath?: string,
   audioOffsetSec = 0,
+  video?: VideoOpts,
 ): string[] {
   const args = ["-y", "-framerate", String(fps), "-i", `${framesDir}/%06d.png`];
   if (audioPath) {
     if (audioOffsetSec > 0) args.push("-itsoffset", String(audioOffsetSec));
     args.push("-i", audioPath);
   }
-  args.push("-c:v", "libx264", "-pix_fmt", "yuv420p");
+  args.push("-c:v", "libx264");
+  // Downscale supersampled frames to the output size with a high-quality Lanczos filter.
+  if (video?.scaleW && video?.scaleH) {
+    args.push("-vf", `scale=${video.scaleW}:${video.scaleH}:flags=lanczos`);
+  }
+  args.push("-pix_fmt", "yuv420p");
+  // High-quality H.264 source (only when quality opts are requested, so the bare call is unchanged).
+  if (video && (video.crf !== undefined || video.preset !== undefined)) {
+    args.push(
+      "-crf", String(video.crf ?? CRF_DEFAULT),
+      "-preset", video.preset ?? PRESET_DEFAULT,
+      "-profile:v", "high",
+    );
+  }
   if (audioPath) args.push("-c:a", "aac", "-b:a", "192k", "-shortest");
   args.push(outPath);
   return args;
@@ -57,6 +88,8 @@ export interface EncodeOptions {
   audioOffsetSec?: number;
   /** Forward ffmpeg stderr to this stream (default process.stderr). Pass null to silence. */
   log?: NodeJS.WritableStream | null;
+  /** Video-quality knobs (Lanczos downscale + CRF/preset). */
+  video?: VideoOpts;
 }
 
 /**
@@ -66,7 +99,7 @@ export interface EncodeOptions {
 export function encode(opts: EncodeOptions): Promise<void> {
   const fps = opts.fps ?? 60;
   const bin = resolveFfmpegBin(opts.ffmpegPath);
-  const args = ffmpegArgs(opts.framesDir, fps, opts.outPath, opts.audioPath, opts.audioOffsetSec ?? 0);
+  const args = ffmpegArgs(opts.framesDir, fps, opts.outPath, opts.audioPath, opts.audioOffsetSec ?? 0, opts.video);
   const log = opts.log === undefined ? process.stderr : opts.log;
 
   return new Promise<void>((resolve, reject) => {

@@ -62,4 +62,26 @@ describe("ffmpegArgs", () => {
     const args = ffmpegArgs("/tmp/frames", 60, "out.mp4", "/tmp/frames/audio.wav", 0);
     expect(args).not.toContain("-itsoffset");
   });
+
+  it("adds a Lanczos downscale filter when scale dims are given (supersample)", () => {
+    const args = ffmpegArgs("/tmp/frames", 60, "out.mp4", undefined, 0, { scaleW: 2160, scaleH: 3840 });
+    const vf = args.indexOf("-vf");
+    expect(vf).toBeGreaterThan(-1);
+    expect(args[vf + 1]).toBe("scale=2160:3840:flags=lanczos");
+  });
+
+  it("adds CRF + preset + high profile when quality opts are given", () => {
+    const args = ffmpegArgs("/tmp/frames", 60, "out.mp4", undefined, 0, { crf: 18 });
+    expect(args[args.indexOf("-crf") + 1]).toBe("18");
+    expect(args).toContain("-preset");
+    expect(args[args.indexOf("-profile:v") + 1]).toBe("high");
+    expect(args).toContain("yuv420p");
+  });
+
+  it("leaves the bare command unchanged when no video opts are given (back-compat)", () => {
+    const args = ffmpegArgs("/tmp/frames", 60, "out.mp4");
+    expect(args).not.toContain("-vf");
+    expect(args).not.toContain("-crf");
+    expect(args).not.toContain("-profile:v");
+  });
 });

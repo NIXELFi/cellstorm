@@ -10,9 +10,14 @@ import { captureFrames, packFrames, type BattleConfig, type BattleLog } from "@c
 import type { HudConfig } from "@cellstorm/render/hud-config";
 import { buildOpeningSequence, DEFAULT_OPENING, type OpeningConfig } from "@cellstorm/render/opening";
 
-// Master 9:16 resolution for production renders.
+// Master 9:16 resolution for production renders. Default output is the full 4K master (--scale 1);
+// 1080p (--scale 0.5) is deprecated for delivery (YouTube re-encode mush). 60fps throughout.
 export const MASTER_WIDTH = 2160;
 export const MASTER_HEIGHT = 3840;
+
+// Supersample factor default: 1 = render at native output size. At 4K the primitives are already
+// crisp so supersampling is optional (and expensive); bump via --ss for 1080 previews or extra AA.
+export const SUPERSAMPLE_DEFAULT = 1;
 
 /** Zero-padded 6-digit frame filename (ffmpeg %06d.png), 0-based: frame 0 -> 000000.png. */
 export function frameFileName(index: number): string {
@@ -25,6 +30,9 @@ export interface RenderOptions {
   framesDir: string;
   /** Output canvas width in pixels. Height is derived to keep the 9:16 master aspect. */
   width?: number;
+  /** Supersample factor: render the canvas at width*ss, screenshot at that size, and the caller
+   *  Lanczos-downscales to `width` on encode. 1 = no supersample. */
+  supersample?: number;
   /** Hard cap on captured frames (safety + fast smoke renders). */
   maxFrames?: number;
   /** Cold-open hook config (flash-forward teaser). Defaults to DEFAULT_OPENING; pass `enabled:false`
@@ -40,8 +48,12 @@ export interface RenderOptions {
 export interface RenderResult {
   frameCount: number;
   ended: boolean;
+  /** Final output dimensions (after any supersample downscale). */
   width: number;
   height: number;
+  /** Dimensions the PNG frames were actually captured at (= output dims when supersample is 1). */
+  renderWidth: number;
+  renderHeight: number;
   /** Number of flash-forward teaser frames prepended before t=0 (0 if no teaser). The caller offsets
    *  the audio by this many frames so the soundtrack still lines up with the real battle. */
   teaserFrames: number;
@@ -77,9 +89,14 @@ const PAGE_HTML = `<!doctype html><html><head><meta charset="utf-8"><style>
 </style></head><body><div id="wrap"><canvas id="stage"></canvas><div id="hud"></div></div></body></html>`;
 
 export async function renderBattle(opts: RenderOptions): Promise<RenderResult> {
-  const width = opts.width ?? MASTER_WIDTH;
+  const even = (n: number) => Math.max(2, Math.round(n / 2) * 2); // libx264 needs even dims
+  const width = even(opts.width ?? MASTER_WIDTH);
   // Preserve the 9:16 master aspect regardless of the requested width.
-  const height = Math.round((width * MASTER_HEIGHT) / MASTER_WIDTH);
+  const height = even((width * MASTER_HEIGHT) / MASTER_WIDTH);
+  // Supersample: capture at render*ss, then the encode Lanczos-downscales to width/height.
+  const ss = opts.supersample && opts.supersample > 0 ? opts.supersample : 1;
+  const renderWidth = even(width * ss);
+  const renderHeight = even((renderWidth * MASTER_HEIGHT) / MASTER_WIDTH);
   const maxFrames = opts.maxFrames ?? opts.config.maxTicks + 60;
   const progressEvery = opts.progressEvery ?? 60;
 
@@ -111,13 +128,13 @@ export async function renderBattle(opts: RenderOptions): Promise<RenderResult> {
   const browser = await chromium.launch({ headless: true });
   let frameCount = 0;
   try {
-    const page = await browser.newPage({ viewport: { width, height } });
+    const page = await browser.newPage({ viewport: { width: renderWidth, height: renderHeight } });
     await page.setContent(PAGE_HTML, { waitUntil: "load" });
     await page.addScriptTag({ content: pageScript });
 
     await page.evaluate(
       async (args) => { await window.__cellstorm.init(args); },
-      { config: opts.config, hud: opts.hud, width, height, framesB64, events: log.events },
+      { config: opts.config, hud: opts.hud, width: renderWidth, height: renderHeight, framesB64, events: log.events },
     );
 
     // Screenshot the full viewport (canvas + CSS HUD overlay) so the broadcast HUD bakes in.
@@ -140,5 +157,5 @@ export async function renderBattle(opts: RenderOptions): Promise<RenderResult> {
     await browser.close();
   }
 
-  return { frameCount, ended: total >= frames.length, width, height, teaserFrames: sequence.cutAt, log };
+  return { frameCount, ended: total >= frames.length, width, height, renderWidth, renderHeight, teaserFrames: sequence.cutAt, log };
 }

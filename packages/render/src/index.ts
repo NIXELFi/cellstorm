@@ -35,6 +35,10 @@ export type { Theme, TeamTheme } from "./theme";
 export { ParticleField } from "./fx";
 export type { CosmeticParticle } from "./fx";
 
+// Cosmetic clash-front detection (pure; cosmetic only).
+export { CLASH_TUNING, findClashes } from "./clash";
+export type { ClashTuning, ClashCell, ClashPoint, FindClashesOpts } from "./clash";
+
 // Pure sim-driving seam (shared determinism contract; no Pixi).
 export { startSim, advance, seekState, countsOf } from "./simCore";
 export type { SimState } from "./simCore";

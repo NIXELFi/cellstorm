@@ -17,8 +17,8 @@ import { renderBattleAudioWav } from "@cellstorm/audio";
 // and throws under Node-side CLI use).
 import { DEFAULT_HUD, type HudConfig } from "@cellstorm/render/hud-config";
 import { Store } from "@cellstorm/cli";
-import { renderBattle, MASTER_WIDTH } from "./renderBattle";
-import { encode } from "./encode";
+import { renderBattle, MASTER_WIDTH, SUPERSAMPLE_DEFAULT } from "./renderBattle";
+import { encode, CRF_DEFAULT } from "./encode";
 
 export interface RenderCliArgs {
   config?: string;
@@ -26,6 +26,10 @@ export interface RenderCliArgs {
   out?: string;
   hud?: string;
   scale?: string;
+  /** Supersample factor (render larger, Lanczos-downscale on encode). Defaults to SUPERSAMPLE_DEFAULT. */
+  ss?: string;
+  /** H.264 CRF (lower = higher quality). Defaults to CRF_DEFAULT. */
+  crf?: string;
   maxframes?: string;
   fps?: string;
   keep?: boolean;
@@ -43,6 +47,8 @@ export function parseRenderArgs(argv: string[]): RenderCliArgs {
       out: { type: "string" },
       hud: { type: "string" },
       scale: { type: "string" },
+      ss: { type: "string" },
+      crf: { type: "string" },
       maxframes: { type: "string" },
       fps: { type: "string" },
       keep: { type: "boolean" },
@@ -93,12 +99,16 @@ async function main(argv: string[]): Promise<void> {
   const hud = resolveHud(args.hud);
   if (args["debug-safe"]) hud.debugSafeArea = true;
   const width = resolveWidth(args.scale);
+  const supersample = args.ss ? Number(args.ss) : SUPERSAMPLE_DEFAULT;
+  if (!Number.isFinite(supersample) || supersample <= 0) throw new Error(`--ss must be > 0, got "${args.ss}"`);
+  const crf = args.crf ? Number(args.crf) : CRF_DEFAULT;
+  if (!Number.isFinite(crf) || crf < 0) throw new Error(`--crf must be >= 0, got "${args.crf}"`);
   const maxFrames = args.maxframes ? Number(args.maxframes) : undefined;
   const fps = args.fps ? Number(args.fps) : 60;
 
   const framesDir = mkdtempSync(join(tmpdir(), "cellstorm-frames-"));
   process.stdout.write(
-    `Rendering seed=${config.seed} powers=${config.powers.join("/")} width=${width} -> ${args.out}\n`,
+    `Rendering seed=${config.seed} powers=${config.powers.join("/")} width=${width} ss=${supersample} crf=${crf} -> ${args.out}\n`,
   );
 
   try {
@@ -107,6 +117,7 @@ async function main(argv: string[]): Promise<void> {
       hud,
       framesDir,
       width,
+      supersample,
       maxFrames,
       // Emit a machine-parseable total so the harness can show a progress bar + ETA (see
       // renderProgress.ts). progressEvery is small so the bar updates smoothly.
@@ -114,8 +125,10 @@ async function main(argv: string[]): Promise<void> {
       onProgress: (f) => process.stdout.write(`  ${f} frames captured...\n`),
       progressEvery: 15,
     });
+    const downscaling = result.renderWidth !== result.width;
     process.stdout.write(
-      `Captured ${result.frameCount} frames (${result.width}x${result.height}, ended=${result.ended}). Encoding...\n`,
+      `Captured ${result.frameCount} frames (${result.renderWidth}x${result.renderHeight}` +
+        `${downscaling ? ` -> ${result.width}x${result.height} Lanczos` : ""}, ended=${result.ended}). Encoding...\n`,
     );
 
     // Generate the soundtrack from the SAME Node simulation that produced the video frames
@@ -130,7 +143,10 @@ async function main(argv: string[]): Promise<void> {
     // Delay the audio by the flash-forward teaser length so the soundtrack starts at the cut to t=0
     // and stays in sync with the battle. The teaser plays silent (clean visual gut-punch).
     const audioOffsetSec = result.teaserFrames / fps;
-    await encode({ framesDir, outPath: args.out, fps, audioPath, audioOffsetSec });
+    await encode({
+      framesDir, outPath: args.out, fps, audioPath, audioOffsetSec,
+      video: { crf, ...(downscaling ? { scaleW: result.width, scaleH: result.height } : {}) },
+    });
     process.stdout.write(`Done: ${args.out}${audioPath ? " (with sound)" : " (muted)"}\n`);
   } finally {
     if (!args.keep) rmSync(framesDir, { recursive: true, force: true });

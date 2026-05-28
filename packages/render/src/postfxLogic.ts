@@ -47,3 +47,17 @@ export function aberrationPixels(impact: number, base: number, max: number): num
   const i = impact < 0 ? 0 : impact > 1 ? 1 : impact;
   return base + (max - base) * i;
 }
+
+/**
+ * Deterministic dither seed in [0,1) for a given sim tick — fed to the NoiseFilter so the grain
+ * pattern advances each frame (a lively dither that reads better than a static one) without ever
+ * touching the wall clock, so headless and harness render identically.
+ *
+ * A large irrational multiplier hashed back into the unit interval gives a well-distributed value
+ * that changes a lot between adjacent ticks (no visible repetition over any realistic battle).
+ */
+export function ditherSeed(frame: number): number {
+  // Fractional part of frame * an irrational stride; |.| guards against negative frames.
+  const v = Math.abs(frame) * 0.6180339887498949; // golden ratio conjugate — even coverage of [0,1)
+  return v - Math.floor(v);
+}

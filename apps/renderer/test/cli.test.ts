@@ -27,6 +27,12 @@ describe("parseRenderArgs", () => {
     expect(a.scale).toBeUndefined();
     expect(a.keep).toBeUndefined();
   });
+
+  it("parses --ss and --crf", () => {
+    const a = parseRenderArgs(["--config", "{}", "--out", "o.mp4", "--ss", "1.5", "--crf", "16"]);
+    expect(a.ss).toBe("1.5");
+    expect(a.crf).toBe("16");
+  });
 });
 
 describe("resolveConfig", () => {

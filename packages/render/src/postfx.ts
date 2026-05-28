@@ -8,9 +8,17 @@
 // touch of chromatic aberration that swells on explosions/deaths, a small screen shake on impact,
 // and a brief brightness/bloom pop on the winner reveal.
 
-import { Application, Container } from "pixi.js";
+import { Application, Container, NoiseFilter, type Filter } from "pixi.js";
 import { AdvancedBloomFilter, RGBSplitFilter, AdjustmentFilter, CRTFilter } from "pixi-filters";
-import { aberrationPixels, shakeOffset } from "./postfxLogic";
+import { aberrationPixels, shakeOffset, ditherSeed } from "./postfxLogic";
+
+/**
+ * Film-grain dither sitting on top of the finished frame. On the dark backgrounds this aesthetic
+ * lives on, 8-bit gradients (glow falloff, vignette, colour grade) band visibly; a faint noise
+ * breaks the banding. Kept very low — it's a fidelity floor, not a look. The seed is advanced per
+ * sim tick (see `ditherSeed`) so the dither animates without any wall-clock dependence.
+ */
+export const DITHER_TUNING = { enabled: true, amount: 0.05 };
 
 export interface PostFxOptions {
   /** Arena-units -> canvas-pixels factor, so shake reads consistently at preview and 4K. */
@@ -31,6 +39,7 @@ export class PostFx {
   private readonly rgb: RGBSplitFilter;
   private readonly grade: AdjustmentFilter;
   private readonly vignette: CRTFilter;
+  private readonly dither: NoiseFilter | null;
   private readonly scale: number;
   private readonly enabled: boolean;
   private readonly baseX: number;
@@ -60,8 +69,15 @@ export class PostFx {
     // darkens only the canvas (battle), never the DOM HUD, and its darkening lands in the outer margins
     // that the Shorts UI occludes anyway — kept very low so it can't obscure the action or HUD.
     this.vignette = new CRTFilter({ vignetting: 0.04, vignettingAlpha: 1, vignettingBlur: 0.3, lineWidth: 0, lineContrast: 0, noise: 0, curvature: 0 });
+    // Subtle grain dither, last in the chain so it sits on top of the finished gradient and breaks
+    // its banding. `noise` is the constant fidelity floor; `seed` is animated per tick in update().
+    this.dither = DITHER_TUNING.enabled ? new NoiseFilter({ noise: DITHER_TUNING.amount, seed: ditherSeed(0) }) : null;
 
-    if (this.enabled) this.outer.filters = [this.bloom, this.rgb, this.grade, this.vignette];
+    if (this.enabled) {
+      const chain: Filter[] = [this.bloom, this.rgb, this.grade, this.vignette];
+      if (this.dither) chain.push(this.dither);
+      this.outer.filters = chain;
+    }
   }
 
   /** Drive the tick-reactive uniforms. `impact` and `flash` are 0..1. */
@@ -76,6 +92,9 @@ export class PostFx {
 
     this.grade.brightness = 1 + flash * 0.25; // subtle pop on the winner reveal
     this.bloom.bloomScale = BLOOM_SCALE + flash * 0.15;
+
+    // Advance the grain pattern each tick (deterministic — no wall clock); amount stays constant.
+    if (this.dither) this.dither.seed = ditherSeed(frame);
   }
 
   destroy(): void {

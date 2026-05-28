@@ -1,6 +1,6 @@
 import { describe, test, expect } from "vitest";
 import type { SimEvent } from "@cellstorm/sim";
-import { impactFromEvents, decayImpact, winnerFlash, shakeOffset, aberrationPixels } from "../src/postfxLogic";
+import { impactFromEvents, decayImpact, winnerFlash, shakeOffset, aberrationPixels, ditherSeed } from "../src/postfxLogic";
 
 describe("impactFromEvents", () => {
   test("explosions hit harder than deaths; quiet ticks add nothing", () => {
@@ -69,5 +69,25 @@ describe("aberrationPixels", () => {
     expect(aberrationPixels(1, 1, 4)).toBeCloseTo(4, 6);
     expect(aberrationPixels(0.5, 1, 4)).toBeCloseTo(2.5, 6);
     expect(aberrationPixels(2, 1, 4)).toBeCloseTo(4, 6); // clamped
+  });
+});
+
+describe("ditherSeed", () => {
+  test("always within [0,1)", () => {
+    for (let f = 0; f < 1000; f++) {
+      const s = ditherSeed(f);
+      expect(s).toBeGreaterThanOrEqual(0);
+      expect(s).toBeLessThan(1);
+    }
+  });
+  test("deterministic for a given frame", () => {
+    expect(ditherSeed(42)).toBe(ditherSeed(42));
+    expect(ditherSeed(0)).toBe(ditherSeed(0));
+  });
+  test("varies across frames (the grain actually advances)", () => {
+    expect(ditherSeed(10)).not.toBe(ditherSeed(11));
+    const seen = new Set<number>();
+    for (let f = 0; f < 50; f++) seen.add(ditherSeed(f));
+    expect(seen.size).toBe(50); // every frame a distinct seed
   });
 });
