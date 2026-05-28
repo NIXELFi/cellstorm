@@ -9,7 +9,7 @@ import { parseArgs } from "node:util";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { normalizeConfig, runBattle, type BattleConfig } from "@cellstorm/sim";
+import { normalizeConfig, type BattleConfig } from "@cellstorm/sim";
 import { renderBattleAudioWav } from "@cellstorm/audio";
 // Import the HUD config from the pure (no-Pixi) subpath export rather than the @cellstorm/render
 // package index, whose BattlePlayer re-export pulls in pixi.js (which touches `navigator` at load
@@ -109,14 +109,13 @@ async function main(argv: string[]): Promise<void> {
       `Captured ${result.frameCount} frames (${result.width}x${result.height}, ended=${result.ended}). Encoding...\n`,
     );
 
-    // Generate the soundtrack from the deterministic event log (re-sim is cheap next to Playwright;
-    // the determinism contract guarantees it matches the frames the browser produced). Skip on --mute.
+    // Generate the soundtrack from the SAME Node simulation that produced the video frames
+    // (result.log) — guarantees audio and video are the identical battle, perfectly in sync.
     let audioPath: string | undefined;
     if (!args.mute) {
-      const { log } = runBattle(config);
       audioPath = join(framesDir, "audio.wav");
-      writeFileSync(audioPath, renderBattleAudioWav(log, fps));
-      process.stdout.write(`  audio: ${log.events.length} events scored -> ${audioPath}\n`);
+      writeFileSync(audioPath, renderBattleAudioWav(result.log, fps));
+      process.stdout.write(`  audio: ${result.log.events.length} events scored -> ${audioPath}\n`);
     }
 
     await encode({ framesDir, outPath: args.out, fps, audioPath });

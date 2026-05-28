@@ -6,7 +6,7 @@
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { build } from "esbuild";
-import type { BattleConfig } from "@cellstorm/sim";
+import { captureFrames, packFrames, type BattleConfig, type BattleLog } from "@cellstorm/sim";
 import type { HudConfig } from "@cellstorm/render/hud-config";
 
 // Master 9:16 resolution for production renders.
@@ -36,6 +36,9 @@ export interface RenderResult {
   ended: boolean;
   width: number;
   height: number;
+  /** The authoritative battle log from the SAME Node simulation that produced the frames (so the
+   *  caller can generate perfectly-synced audio from it — single source of truth). */
+  log: BattleLog;
 }
 
 /** Bundle the browser page entry (BattlePlayer + pixi) into a single IIFE esbuild can inject. */
@@ -73,48 +76,41 @@ export async function renderBattle(opts: RenderOptions): Promise<RenderResult> {
 
   await mkdir(opts.framesDir, { recursive: true });
 
+  // SINGLE SOURCE OF TRUTH: simulate the whole battle ONCE in Node and capture the drawable frames.
+  // The browser only draws these — it never re-sims — so the render is identical to the harness
+  // preview (which replays the same Node frames) regardless of V8 build. Pack to base64 to ship it.
+  const { log, frames } = captureFrames(opts.config);
+  const framesB64 = Buffer.from(packFrames(frames)).toString("base64");
+
   // Bundle first so a bundling failure aborts before launching a browser.
   const pageScript = await bundlePageScript();
-
-  // Imported lazily so the module (and its pure helpers) can be loaded without playwright present.
   const { chromium } = await import("playwright");
 
   const browser = await chromium.launch({ headless: true });
   let frameCount = 0;
-  let ended = false;
+  const total = Math.min(frames.length, maxFrames);
   try {
     const page = await browser.newPage({ viewport: { width, height } });
     await page.setContent(PAGE_HTML, { waitUntil: "load" });
     await page.addScriptTag({ content: pageScript });
 
     await page.evaluate(
-      async (args) => {
-        await window.__cellstorm.init(args);
-      },
-      { config: opts.config, hud: opts.hud, width, height },
+      async (args) => { await window.__cellstorm.init(args); },
+      { config: opts.config, hud: opts.hud, width, height, framesB64, events: log.events },
     );
 
-    // Capture the full viewport (canvas + CSS HUD overlay), not just the canvas, so the
-    // broadcast HUD is baked into the frames.
+    // Screenshot the full viewport (canvas + CSS HUD overlay) so the broadcast HUD bakes in.
     const shot = () => page.screenshot({ path: join(opts.framesDir, frameFileName(frameCount)) });
 
-    // Capture tick 0 (initial state) first, then step.
-    while (frameCount < maxFrames) {
+    for (let i = 0; i < total; i++) {
+      await page.evaluate((idx) => window.__cellstorm.drawFrame(idx), i);
       await shot();
       frameCount++;
       if (opts.onProgress && frameCount % progressEvery === 0) opts.onProgress(frameCount);
-
-      ended = await page.evaluate(() => window.__cellstorm.stepFrame());
-      if (ended) {
-        // Capture the final post-end frame (winner overlay settles).
-        await shot();
-        frameCount++;
-        break;
-      }
     }
   } finally {
     await browser.close();
   }
 
-  return { frameCount, ended, width, height };
+  return { frameCount, ended: total >= frames.length, width, height, log };
 }

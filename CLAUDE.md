@@ -29,11 +29,19 @@ Dependency direction is one-way: `sim` depends on nothing; `render`/`score` depe
 depend on packages. Keep `sim` free of DOM/Pixi/Node-only imports.
 
 ### THE DETERMINISM CONTRACT (most important invariant)
-`runBattle(config)` must produce a **bit-identical** event log every time, and identical to the
-in-harness/in-renderer stepping. This is what makes "score then render" valid.
+`runBattle(config)` is deterministic **within one JS engine**: same seed → bit-identical event log
+every run. This makes "score then render" valid.
 - **No `Math.random` / `Date.now` / `performance.now` / `requestAnimationFrame`-timing in
   `packages/sim/src`.** All gameplay randomness comes from one seeded `mulberry32` PRNG in the
   `World` (`prng.ts`), seeded from `config.seed`. Fixed timestep; nothing reads wall-clock.
+- **⚠️ NOT bit-identical ACROSS V8 builds.** Node, headless Chromium, and a user's browser round
+  `a*b+c` differently (FMA contraction) — a ~1 ULP/op difference that a chaotic battle amplifies into
+  a *different winner* over thousands of ticks. So the browser MUST NOT simulate independently. We
+  simulate ONCE in Node and ship the per-tick drawable state (`captureFrames`/`packFrames` in
+  `sim/drawframe.ts`); the renderer and the harness preview only DRAW it (`BattlePlayer.renderSnapshot`),
+  and audio is scored from that same Node log. Result: **preview == render == audio on every engine.**
+  (Do NOT "optimize" the renderer/harness back to stepping their own sim — that's the exact bug that
+  shipped a different battle than the preview. See git log: fix/render-determinism.)
 - **Three RNG streams:** the *gameplay* stream lives in the sim; the *cosmetic* stream (particles/FX)
   is owned by the renderer/player, seeded `config.seed ^ COSMETIC_SALT`; the *audio* stream lives in
   `@cellstorm/audio`, seeded `config.seed ^ AUDIO_SALT`. Visual/audio tweaks must never perturb
@@ -173,8 +181,8 @@ Float32 PCM) -> pcmToWav()`. No samples — everything is synthesized (oscillato
   a one-pole ~6kHz high-cut, and a real **brick-wall peak limiter** (instant attack / ~80ms release,
   ceiling 0.8) that GUARANTEES the output never approaches full scale — it cannot hard-clip even with
   many teams stacking events (a unit test pins this; verified ~−1.7 dBFS on a 5-team render).
-- **Renderer:** `cli.ts` re-sims via `runBattle(config)` (deterministic, matches the captured frames)
-  to get the log, writes `audio.wav` to the temp frames dir, and `encode()` muxes it
+- **Renderer:** `renderBattle` simulates once in Node (`captureFrames`) and returns that `log`; the
+  CLI scores the audio from the SAME log (so audio == video, perfectly synced), writes `audio.wav`, muxes it
   (`ffmpegArgs(..., audioPath)` adds `-i audio.wav -c:a aac -b:a 192k -shortest`). `--mute` skips it.
 - **Harness:** a **"Sound" toggle** plays the same synthesized buffer through Web Audio, started in
   lockstep with playback. Synced **only at 1× from the current frame**; scrubbing / speed≠1 / pause
