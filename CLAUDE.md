@@ -138,6 +138,15 @@ studies (see the `apps/lab/*.mts` scripts; rebuild similar ones to re-tune).
   triangle=aggressive/fast, diamond=burst/ranged, hexagon=control, circle=sustain — `glyphs.ts`).
   Glow layer + state FX (charger dash trail, plague tint, stun dim, frenzy heat, heal/shield halos)
   + styled death bursts (Glasshammer shatter, Bomb shockwave). Random per-team spawn locations.
+- **Post-FX (`postfx.ts` + `postfxLogic.ts`):** a filter stack (`pixi-filters`) wraps the scene in the
+  player — neon **bloom**, soft **vignette** (a `CRTFilter` with only vignetting on), **color grade**
+  (`AdjustmentFilter`), plus **chromatic aberration** + a small **screen shake** that swell on
+  explosions/deaths and a brief brightness/bloom **pop on the winner reveal**. Cosmetic only (reads no
+  gameplay RNG). Tasteful/minimal but visible. Applied to the Pixi canvas only — the CSS HUD stays
+  crisp on top. The shake lives on an inner container (vignette stays screen-fixed) with a 1.5%
+  overscan so it never exposes the border. ALL reactive uniforms are driven from the **sim tick** (the
+  `impact` envelope + winner flash), never wall-clock — so the FX render identically in the headless
+  renderer instead of freezing. The reactive math is pure + unit-tested in `postfxLogic.ts`.
 
 ---
 
