@@ -17,6 +17,7 @@ function clampToArena(c: Cell, W: number, H: number): void {
  */
 export function movementSystem(w: World): void {
   const { width: W, height: H } = w.cfg.arena;
+  const ai = w.cfg.ai;
   for (let i = 0; i < w.cells.length; i++) {
     const c = w.cells[i]!;
     if (!c.alive) continue;
@@ -35,7 +36,7 @@ export function movementSystem(w: World): void {
     if (state === "engage" && c.tx !== null) {
       const dx = c.tx - c.x, dy = c.ty! - c.y;
       const d = Math.sqrt(dx * dx + dy * dy) + 0.01;
-      const f = (p.aggro ? 0.30 : 0.20) * speedMult;
+      const f = (p.aggro ? ai.aggroEngageForce : ai.engageForce) * speedMult;
       c.vx += (dx / d) * f;
       c.vy += (dy / d) * f;
     } else if (state === "retreat" && c.acx !== null) {
@@ -55,12 +56,20 @@ export function movementSystem(w: World): void {
       c.vx += (dx / d) * 0.20 * speedMult;
       c.vy += (dy / d) * 0.20 * speedMult;
     } else {
+      // hunt: no enemy in perception. Wander randomly, optionally biased toward the arena
+      // center so late-game survivors converge instead of drifting apart (anti-stalemate).
       c.vx += (w.prng() - 0.5) * 0.35 * speedMult;
       c.vy += (w.prng() - 0.5) * 0.35 * speedMult;
+      if (ai.huntCenterBias > 0) {
+        const dx = W / 2 - c.x, dy = H / 2 - c.y;
+        const d = Math.sqrt(dx * dx + dy * dy) + 0.01;
+        c.vx += (dx / d) * ai.huntCenterBias * speedMult;
+        c.vy += (dy / d) * ai.huntCenterBias * speedMult;
+      }
     }
     if (c.acx !== null && state !== "retreat") {
-      c.vx += (c.avx - c.vx) * 0.04;
-      c.vy += (c.avy - c.vy) * 0.04;
+      c.vx += (c.avx - c.vx) * ai.flockWeight;
+      c.vy += (c.avy - c.vy) * ai.flockWeight;
     }
 
     c.x += c.vx; c.y += c.vy;

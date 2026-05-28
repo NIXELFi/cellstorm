@@ -6,8 +6,6 @@ import { collisionSystem } from "./systems/collision";
 import { resolveSpawnsAndCompact } from "./systems/spawn";
 import type { EventSink } from "./events";
 
-const STALEMATE_TICKS = 60 * 12; // 12s of no elimination
-
 /** Advance one fixed tick. Returns true when the battle has ended. */
 export function step(w: World, sink: EventSink): boolean {
   w.frame++;
@@ -47,7 +45,7 @@ export function step(w: World, sink: EventSink): boolean {
     sink.end(w.winner);
     return true;
   }
-  if (w.frame - w.lastChangeFrame > STALEMATE_TICKS || w.frame >= w.cfg.maxTicks) {
+  if (w.frame - w.lastChangeFrame > w.cfg.ai.stalemateTicks || w.frame >= w.cfg.maxTicks) {
     w.winner = -1; // unresolved/stalemate
     sink.end(w.winner);
     return true;

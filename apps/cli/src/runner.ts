@@ -1,6 +1,6 @@
 import { Worker } from "node:worker_threads";
 import { createRequire } from "node:module";
-import type { BattleConfig } from "@cellstorm/sim";
+import { normalizeConfig, type BattleConfig } from "@cellstorm/sim";
 import type { BattleLog } from "@cellstorm/sim";
 import type { ScoreProfile } from "@cellstorm/score";
 import { expand, type SweepSpec } from "./sweepSpec";
@@ -109,10 +109,9 @@ function trySpawnWorker(): Worker | null {
   }
 }
 
-const PROBE_CONFIG: BattleConfig = {
-  seed: 0, teamCount: 2, powers: ["Tank", "Swift"], totalCells: 40,
-  arena: { width: 280, height: 498 }, maxTicks: 300,
-};
+const PROBE_CONFIG: BattleConfig = normalizeConfig({
+  seed: 0, teamCount: 2, powers: ["Tank", "Swift"], totalCells: 40, maxTicks: 300,
+});
 
 /**
  * Verify a worker can actually start AND run a battle (i.e. the tsx bootstrap

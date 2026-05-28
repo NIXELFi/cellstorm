@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { scoreDiff } from "../src/scoreDiff";
 import { DEFAULT_PROFILE, type ScoreProfile, type BattleLog } from "@cellstorm/score";
+import { normalizeConfig } from "@cellstorm/sim";
 
 /**
  * Build a log whose drama components evaluate to known values, sidestepping the
@@ -24,7 +25,7 @@ function log(winnerStart: number, winnerEnd: number, otherStart: number): Battle
     events.push({ type: "death", tick: t, cellId: t, x: 0, y: 0, team: 1 });
   }
   return {
-    config: { seed: 0, teamCount: 2, powers: ["Tank", "Plague"], totalCells: 120, arena: { width: 280, height: 498 }, maxTicks: 9000 },
+    config: normalizeConfig({ seed: 0, teamCount: 2, powers: ["Tank", "Plague"], totalCells: 120, maxTicks: 9000 }),
     events,
     timeline,
     durationTicks,

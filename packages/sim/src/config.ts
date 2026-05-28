@@ -1,4 +1,22 @@
-import type { BattleConfig } from "./types";
+import type { AiParams, BattleConfig } from "./types";
+
+// Default AI tuning, from the aggression/duration optimization study (see docs/lab studies).
+// vs the original prototype values this took battles from 20% -> 88% resolving with a clear
+// winner, ~3x more landing in the 15-40s window, and ~4.4x drama yield. The recipe: wider
+// perception so cells find each other, no retreating (commit to the fight), a small hunt nudge
+// to converge stragglers, and reduced melee lethality to stretch fights to a watchable ~20s.
+// Original values shown in comments for reference.
+export const DEFAULT_AI: AiParams = {
+  perceptionR2: 4096, // 64px radius (was 2500/50px)
+  scanWindow: 5, // was 3
+  engageForce: 0.2, // unchanged — gentle, not frantic
+  aggroEngageForce: 0.3, // unchanged
+  retreatHpFrac: 0, // was 0.28 — retreat disabled; cells commit
+  flockWeight: 0.04,
+  huntCenterBias: 0.04, // was 0 — small pull to arena center converges stragglers
+  stalemateTicks: 60 * 12,
+  damageScale: 0.4, // was 1 — lower melee lethality stretches fights into the window
+};
 
 export const DEFAULTS = {
   totalCells: 900,
@@ -7,7 +25,8 @@ export const DEFAULTS = {
 } as const;
 
 export type BattleConfigInput =
-  Pick<BattleConfig, "seed" | "teamCount" | "powers"> & Partial<BattleConfig>;
+  Pick<BattleConfig, "seed" | "teamCount" | "powers"> &
+  Partial<Omit<BattleConfig, "ai">> & { ai?: Partial<AiParams> };
 
 export function normalizeConfig(input: BattleConfigInput): BattleConfig {
   if (input.powers.length !== input.teamCount) {
@@ -27,5 +46,6 @@ export function normalizeConfig(input: BattleConfigInput): BattleConfig {
     totalCells,
     arena: input.arena ?? { ...DEFAULTS.arena },
     maxTicks: input.maxTicks ?? DEFAULTS.maxTicks,
+    ai: { ...DEFAULT_AI, ...input.ai },
   };
 }

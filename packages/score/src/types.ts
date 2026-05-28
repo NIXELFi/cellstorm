@@ -16,7 +16,8 @@ export interface ScoreProfile {
 }
 
 export const DEFAULT_PROFILE: ScoreProfile = {
-  targetMinSec: 30, targetMaxSec: 60, fps: 60, maxStalemateSec: 8,
+  // Shorts-tuned duration window: ~15s floor, ~25s sweet spot, ~40s cap.
+  targetMinSec: 15, targetMaxSec: 40, fps: 60, maxStalemateSec: 8,
   weights: { leadVolatility: 1, comeback: 1.5, climaxTiming: 1, closeFinish: 1, sustainedChaos: 0.5 },
 };
 

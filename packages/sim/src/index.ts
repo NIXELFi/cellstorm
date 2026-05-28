@@ -11,7 +11,7 @@ export { step } from "./step";
 
 // Powers + config.
 export { POWERS, POWER_NAMES, powerByName } from "./powers";
-export { normalizeConfig, DEFAULTS } from "./config";
+export { normalizeConfig, DEFAULTS, DEFAULT_AI } from "./config";
 export type { BattleConfigInput } from "./config";
 
 // Events.
@@ -24,5 +24,5 @@ export type { Prng } from "./prng";
 
 // Core types.
 export type {
-  Power, Cell, Projectile, Corpse, ArenaParams, BattleConfig, TeamCountSnapshot,
+  Power, Cell, Projectile, Corpse, ArenaParams, AiParams, BattleConfig, TeamCountSnapshot,
 } from "./types";
