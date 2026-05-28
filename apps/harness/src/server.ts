@@ -270,6 +270,36 @@ async function handleApi(
     return true;
   }
 
+  // POST /api/render  body: { configId, hud?, scale? } — render an MP4 for a candidate, then
+  // reveal it in Finder and open it for playback (macOS `open`). Returns a renderId to poll.
+  if (method === "POST" && path === "/api/render") {
+    let body: { configId?: string; hud?: unknown; scale?: number };
+    try {
+      body = JSON.parse((await readBody(req)) || "{}");
+    } catch {
+      sendJson(res, 400, { error: "invalid json" });
+      return true;
+    }
+    if (!body.configId) {
+      sendJson(res, 400, { error: "configId required" });
+      return true;
+    }
+    try {
+      sendJson(res, 200, startRender(body.configId, body.hud, body.scale));
+    } catch (err) {
+      sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) });
+    }
+    return true;
+  }
+
+  // GET /api/render/:id — render progress/state.
+  const renderMatch = /^\/api\/render\/([^/]+)$/.exec(path);
+  if (method === "GET" && renderMatch) {
+    const st = renders.get(renderMatch[1]!);
+    sendJson(res, st ? 200 : 404, st ?? { error: "unknown render" });
+    return true;
+  }
+
   return false; // not an API route
 }
 
@@ -324,6 +354,73 @@ function startSweepChild(job: {
     process.stderr.write(`failed to spawn sweep child: ${err.message}\n`);
   });
   child.unref();
+}
+
+// --- render manager --------------------------------------------------------
+interface RenderState {
+  state: "rendering" | "encoding" | "done" | "error";
+  frames: number;
+  out: string;
+  error?: string;
+}
+const renders = new Map<string, RenderState>();
+
+/**
+ * Render one candidate to an MP4 via the renderer CLI (Playwright frame capture + ffmpeg), then
+ * reveal it in Finder and open it for playback. Defaults to a 1080-wide (Shorts) render for speed;
+ * pass scale=1 for full 2160px. Progress is parsed from the CLI's stdout.
+ */
+function startRender(configId: string, hud: unknown, scale?: number): { renderId: string; out: string } {
+  const repoRoot = resolve(__dirname, "..", "..", "..");
+  const outDir = join(repoRoot, "out");
+  mkdirSync(outDir, { recursive: true });
+  const safe = configId.replace(/[^a-zA-Z0-9]+/g, "_");
+  const out = join(outDir, `${safe}-${Date.now()}.mp4`);
+  const cliEntry = resolve(__dirname, "..", "..", "renderer", "src", "cli.ts");
+  const args = [
+    cliEntry, "--config", configId, "--db", DB_PATH, "--out", out,
+    "--scale", String(scale && scale > 0 ? scale : 0.5),
+  ];
+  if (hud) args.push("--hud", JSON.stringify(hud));
+
+  const renderId = `r-${Date.now()}`;
+  renders.set(renderId, { state: "rendering", frames: 0, out });
+
+  const child = spawn(resolveTsxBin(), args, {
+    cwd: resolve(__dirname, "..", "..", "renderer"),
+    env: process.env,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  child.stdout?.on("data", (b: Buffer) => {
+    const s = b.toString();
+    const m = /(\d+) frames captured/.exec(s);
+    const st = renders.get(renderId);
+    if (!st) return;
+    if (m) st.frames = Number(m[1]);
+    if (/Encoding\.\.\./.test(s)) st.state = "encoding";
+  });
+  let errTail = "";
+  child.stderr?.on("data", (b: Buffer) => {
+    errTail = (errTail + b.toString()).slice(-600);
+  });
+  child.on("error", (err) => {
+    const st = renders.get(renderId);
+    if (st) { st.state = "error"; st.error = err.message; }
+  });
+  child.on("close", (code) => {
+    const st = renders.get(renderId);
+    if (!st) return;
+    if (code === 0) {
+      st.state = "done";
+      // macOS: reveal in Finder, then open in the default player for playback.
+      try { spawn("open", ["-R", out]); } catch { /* best-effort */ }
+      try { spawn("open", [out]); } catch { /* best-effort */ }
+    } else {
+      st.state = "error";
+      st.error = errTail.trim() || `renderer exited with code ${code}`;
+    }
+  });
+  return { renderId, out };
 }
 
 // --- server ----------------------------------------------------------------

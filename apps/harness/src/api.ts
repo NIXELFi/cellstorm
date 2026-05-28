@@ -66,6 +66,29 @@ export function fetchDbPath(): Promise<{ dbPath: string }> {
 export function fetchLatestBatch(): Promise<{ batchId: string | null }> {
   return getJson<{ batchId: string | null }>("/api/latest-batch");
 }
+export interface RenderState {
+  state: "rendering" | "encoding" | "done" | "error";
+  frames: number;
+  out: string;
+  error?: string;
+}
+export async function startRender(
+  configId: string,
+  hud: unknown,
+  scale?: number,
+): Promise<{ renderId: string; out: string }> {
+  const res = await fetch("/api/render", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ configId, hud, scale }),
+  });
+  if (!res.ok) throw new Error(`POST /api/render -> ${res.status}`);
+  return (await res.json()) as { renderId: string; out: string };
+}
+export function fetchRenderProgress(renderId: string): Promise<RenderState> {
+  return getJson<RenderState>(`/api/render/${encodeURIComponent(renderId)}`);
+}
+
 export async function setVideoMade(configId: string, made: boolean): Promise<void> {
   const res = await fetch(`/api/results/${encodeURIComponent(configId)}/video-made`, {
     method: "POST",

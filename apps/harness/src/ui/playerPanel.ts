@@ -8,9 +8,8 @@ import { BattlePlayer, type HudConfig, type Theme } from "@cellstorm/render";
 import { DEFAULT_HUD } from "@cellstorm/render";
 import type { BattleConfig } from "@cellstorm/sim";
 import { configIdOf } from "@cellstorm/cli/config-id";
-import { fetchLog, fetchDbPath } from "../api";
+import { fetchLog, startRender, fetchRenderProgress } from "../api";
 import { climaxTick } from "./logLogic";
-import { buildRenderCommand } from "./renderCommand";
 
 const PREVIEW_SCALE = 1.5; // 280x498 logical -> 420x747 canvas (crisp but light)
 
@@ -168,8 +167,8 @@ export class PlayerPanel {
 
     const sendRender = document.createElement("button");
     sendRender.className = "btn";
-    sendRender.textContent = "Send to render";
-    sendRender.title = "Copy the renderer CLI command for this config + current HUD";
+    sendRender.textContent = "Render video";
+    sendRender.title = "Render this battle to an MP4 (opens in Finder + player when done)";
     sendRender.onclick = () => void this.sendToRender();
 
     const speedSel = document.createElement("select");
@@ -213,37 +212,40 @@ export class PlayerPanel {
     this.controls.append(row1, row2, this.renderCmd);
   }
 
-  /** Build the renderer CLI command for the current config + HUD, copy it to the clipboard, and
-   * display it. The harness can't spawn Playwright in-browser, so this completes the loop by
-   * handing the user the exact working invocation. */
+  /** Render this candidate (config + current HUD) to an MP4 via the bridge, showing live progress.
+   * When it finishes, the bridge reveals the file in Finder and opens it for playback. */
   private async sendToRender(): Promise<void> {
     if (!this.config) return;
-    let dbPath = "<dbpath>";
-    try {
-      dbPath = (await fetchDbPath()).dbPath;
-    } catch {
-      /* fall back to a placeholder if the bridge isn't reachable */
-    }
-    const cmd = buildRenderCommand({
-      configId: configIdOf(this.config),
-      dbPath,
-      hud: this.hud,
-    });
-    let copied = false;
-    try {
-      await navigator.clipboard?.writeText(cmd);
-      copied = true;
-    } catch {
-      /* clipboard may be unavailable (insecure context); the command is still shown below */
-    }
+    const configId = configIdOf(this.config);
     this.renderCmd.hidden = false;
     this.renderCmd.innerHTML = "";
-    const note = document.createElement("div");
-    note.className = "muted";
-    note.textContent = copied ? "Render command copied to clipboard:" : "Render command:";
-    const code = document.createElement("code");
-    code.textContent = cmd;
-    this.renderCmd.append(note, code);
+    const status = document.createElement("div");
+    status.className = "muted";
+    status.textContent = "Starting render…";
+    this.renderCmd.appendChild(status);
+
+    let renderId: string;
+    try {
+      ({ renderId } = await startRender(configId, this.hud));
+    } catch (err) {
+      status.textContent = `Couldn't start render: ${err instanceof Error ? err.message : String(err)}`;
+      return;
+    }
+    const poll = window.setInterval(() => {
+      void fetchRenderProgress(renderId)
+        .then((st) => {
+          if (st.state === "rendering") status.textContent = `Rendering… ${st.frames} frames captured`;
+          else if (st.state === "encoding") status.textContent = `Encoding ${st.frames} frames to MP4…`;
+          else if (st.state === "done") {
+            status.textContent = "Done — opening in Finder + player ✓";
+            window.clearInterval(poll);
+          } else if (st.state === "error") {
+            status.textContent = `Render failed: ${st.error ?? "unknown error"}`;
+            window.clearInterval(poll);
+          }
+        })
+        .catch(() => {});
+    }, 700);
   }
 
   private async jumpToClimax(): Promise<void> {
