@@ -40,9 +40,11 @@ const profileEditor = new ProfileEditor({
 grid.setProfile(profileEditor.getProfile());
 
 const builder = new SweepBuilder({
-  onBatch: (batchId) => {
-    grid.setBatch(batchId);
-    // Poll the grid a few times as results land.
+  onBatch: () => {
+    // Keep the grid showing the whole catalog (not scoped to the new batch): a sweep that
+    // resume-skips already-computed configs adds nothing to its own batch, but the catalog
+    // still holds results worth seeing, and new high-scorers float up by score as they land.
+    grid.setBatch(undefined);
     let n = 0;
     const t = window.setInterval(() => {
       void grid.refresh();

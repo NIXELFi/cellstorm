@@ -264,6 +264,9 @@ function startSweepChild(job: {
   const progressPath = progressFilePath(job.batchId);
   // Clear any stale stop flag from a prior run of this batch id.
   if (existsSync(stopPath)) rmSync(stopPath);
+  // Seed an initial "running" progress file so polls during the child's startup window (before
+  // it writes its own progress) aren't misread as an instantly-finished sweep.
+  writeFileSync(progressPath, JSON.stringify({ done: 0, total: 0, best: 0, running: true }));
 
   const childJobPath = join(tmpdir(), `cellstorm-sweep-${job.batchId}-${Date.now()}.json`);
   writeFileSync(

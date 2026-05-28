@@ -248,6 +248,15 @@ export class SweepBuilder {
     if (!this.activeBatch) return;
     try {
       const p = await fetchProgress(this.activeBatch);
+      if (!p.running && p.total === 0) {
+        // Resume found nothing new to run: every config this spec produces is already in the
+        // catalog. Not an error — say so plainly and stop polling. Existing results stay visible
+        // in the grid (it shows the whole catalog).
+        this.readout.textContent = `${this.activeBatch}: nothing new — all configs already computed. Showing existing results.`;
+        window.clearInterval(this.pollTimer);
+        this.pollTimer = undefined;
+        return;
+      }
       const pct = p.total > 0 ? Math.round((p.done / p.total) * 100) : 0;
       this.readout.textContent = `${this.activeBatch}: ${p.done}/${p.total} (${pct}%) · best ${p.best.toFixed(
         3,
