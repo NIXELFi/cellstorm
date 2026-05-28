@@ -236,70 +236,69 @@ const CSS = `
 }
 /* sizes scale with the canvas via cqh (container query height) so it works at preview AND 4K */
 .cs-side {
-  position: absolute; top: 2.2cqh; left: 2.4cqh; right: 2.4cqh;
-  display: flex; flex-direction: column; gap: 1.1cqh;
+  position: absolute; top: 1.6cqh; left: 1.8cqh; width: 46cqw;
+  display: flex; flex-direction: column; gap: 0.6cqh;
 }
 .cs-card {
-  display: flex; align-items: center; gap: 1.4cqh;
-  padding: 1.1cqh 1.4cqh; border-radius: 1.4cqh;
-  background: linear-gradient(135deg, rgba(14,11,22,0.72), rgba(14,11,22,0.42));
-  border: 0.18cqh solid color-mix(in srgb, var(--c) 35%, transparent);
-  box-shadow: 0 0.5cqh 2cqh rgba(0,0,0,0.45), inset 0 0 1.4cqh color-mix(in srgb, var(--c) 9%, transparent);
-  backdrop-filter: blur(6px);
+  display: flex; align-items: center; gap: 0.9cqh;
+  padding: 0.6cqh 0.9cqh; border-radius: 0.9cqh;
+  background: linear-gradient(135deg, rgba(14,11,22,0.66), rgba(14,11,22,0.36));
+  border: 0.12cqh solid color-mix(in srgb, var(--c) 32%, transparent);
+  box-shadow: 0 0.3cqh 1cqh rgba(0,0,0,0.4);
+  backdrop-filter: blur(5px);
   transition: opacity .25s ease, filter .25s ease;
 }
-.cs-card.cs-lead { border-color: color-mix(in srgb, var(--c) 80%, transparent);
-  box-shadow: 0 0.5cqh 2.4cqh rgba(0,0,0,0.5), 0 0 2.4cqh color-mix(in srgb, var(--c) 45%, transparent); }
-.cs-card.cs-dead { opacity: .28; filter: grayscale(0.7); }
-.cs-bar { width: 0.7cqh; align-self: stretch; border-radius: 1cqh; background: var(--c);
-  box-shadow: 0 0 1.2cqh var(--c); }
+.cs-card.cs-lead { border-color: color-mix(in srgb, var(--c) 75%, transparent);
+  box-shadow: 0 0.3cqh 1.2cqh rgba(0,0,0,0.45), 0 0 1.2cqh color-mix(in srgb, var(--c) 40%, transparent); }
+.cs-card.cs-dead { opacity: .26; filter: grayscale(0.7); }
+.cs-bar { width: 0.4cqh; align-self: stretch; border-radius: 1cqh; background: var(--c);
+  box-shadow: 0 0 0.7cqh var(--c); }
 .cs-mid { flex: 1; min-width: 0; }
-.cs-name { font-weight: 700; font-size: 2.5cqh; letter-spacing: 0.06em; text-transform: uppercase;
-  color: var(--c); line-height: 1; text-shadow: 0 0 1.2cqh color-mix(in srgb, var(--c) 50%, transparent); }
+.cs-name { font-weight: 700; font-size: 1.45cqh; letter-spacing: 0.05em; text-transform: uppercase;
+  color: var(--c); line-height: 1.1; text-shadow: 0 0 0.7cqh color-mix(in srgb, var(--c) 45%, transparent); }
 .cs-dead .cs-name { text-decoration: line-through; }
-.cs-desc { font-size: 1.75cqh; font-weight: 500; color: rgba(232,232,236,0.74); margin-top: 0.6cqh;
+.cs-desc { font-size: 1.0cqh; font-weight: 500; color: rgba(232,232,236,0.62); margin-top: 0.15cqh;
   letter-spacing: 0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.cs-count { font-family: var(--display); font-size: 5cqh; line-height: 0.9; color: #fff;
-  font-variant-numeric: tabular-nums; text-shadow: 0 0 2cqh color-mix(in srgb, var(--c) 60%, transparent);
+.cs-count { font-family: var(--display); font-size: 2.7cqh; line-height: 0.9; color: #fff;
+  font-variant-numeric: tabular-nums; text-shadow: 0 0 1cqh color-mix(in srgb, var(--c) 55%, transparent);
   min-width: 3ch; text-align: right; }
 
 .cs-intro {
   position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-  background: radial-gradient(120% 90% at 50% 42%, rgba(5,2,10,0.55) 0%, rgba(5,2,10,0.9) 70%);
-  text-align: center; padding: 6cqh;
+  background: radial-gradient(110% 80% at 50% 46%, rgba(5,2,10,0.35) 0%, rgba(5,2,10,0.74) 72%);
+  text-align: center; padding: 5cqh;
 }
-.cs-intro-inner { display: flex; flex-direction: column; align-items: center; gap: 2.8cqh; max-width: 92%; }
-.cs-eyebrow { font-weight: 700; letter-spacing: 0.55em; font-size: 2cqh; color: rgba(255,255,255,0.55);
-  text-indent: 0.55em; }
-.cs-intro-title { font-family: var(--display); font-size: 6.8cqh; line-height: 1.0; letter-spacing: 0.01em;
+.cs-intro-inner { display: flex; flex-direction: column; align-items: center; gap: 1.8cqh; max-width: 88%; }
+.cs-eyebrow { font-weight: 700; letter-spacing: 0.5em; font-size: 1.3cqh; color: rgba(255,255,255,0.5);
+  text-indent: 0.5em; }
+.cs-intro-title { font-family: var(--display); font-size: 4.6cqh; line-height: 1.0; letter-spacing: 0.01em;
   text-transform: uppercase; text-wrap: balance;
   background: linear-gradient(180deg, #fff, #c8c8d6); -webkit-background-clip: text; background-clip: text;
-  color: transparent; text-shadow: 0 0.6cqh 3cqh rgba(0,0,0,0.6); }
-.cs-rule { width: 14cqh; height: 0.4cqh; border-radius: 1cqh;
-  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.7), transparent); }
-.cs-sub { font-size: 2.1cqh; font-weight: 600; letter-spacing: 0.05em; color: rgba(232,232,236,0.78);
+  color: transparent; text-shadow: 0 0.4cqh 2cqh rgba(0,0,0,0.55); }
+.cs-rule { width: 9cqh; height: 0.25cqh; border-radius: 1cqh;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.6), transparent); }
+.cs-sub { font-size: 1.4cqh; font-weight: 600; letter-spacing: 0.04em; color: rgba(232,232,236,0.72);
   text-transform: uppercase; }
-.cs-chips { display: flex; flex-wrap: wrap; gap: 1.4cqh; justify-content: center; margin-top: 1cqh; }
-.cs-chip { display: flex; align-items: center; gap: 1cqh; padding: 1cqh 1.6cqh; border-radius: 5cqh;
-  background: rgba(14,11,22,0.6); border: 0.18cqh solid color-mix(in srgb, var(--c) 45%, transparent);
-  box-shadow: inset 0 0 1.6cqh color-mix(in srgb, var(--c) 14%, transparent); }
-.cs-chip-dot { width: 1.6cqh; height: 1.6cqh; border-radius: 50%; background: var(--c);
-  box-shadow: 0 0 1.4cqh var(--c); }
-.cs-chip-name { font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; font-size: 1.9cqh; color: var(--c); }
-.cs-chip-desc { font-size: 1.6cqh; font-weight: 500; color: rgba(232,232,236,0.62); }
+.cs-chips { display: flex; flex-direction: column; gap: 0.7cqh; margin-top: 0.4cqh; align-items: stretch; }
+.cs-chip { display: flex; align-items: center; gap: 0.8cqh; padding: 0.6cqh 1.1cqh; border-radius: 1cqh;
+  background: rgba(14,11,22,0.5); border: 0.12cqh solid color-mix(in srgb, var(--c) 40%, transparent); }
+.cs-chip-dot { width: 1.1cqh; height: 1.1cqh; border-radius: 50%; background: var(--c); flex: none;
+  box-shadow: 0 0 0.9cqh var(--c); }
+.cs-chip-name { font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; font-size: 1.3cqh; color: var(--c); }
+.cs-chip-desc { font-size: 1.15cqh; font-weight: 500; color: rgba(232,232,236,0.58); margin-left: auto; }
 
 .cs-winner {
   position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
   background: radial-gradient(120% 90% at 50% 50%, color-mix(in srgb, var(--c) 14%, rgba(5,2,10,0.55)) 0%, rgba(5,2,10,0.92) 72%);
 }
-.cs-winner-card { display: flex; flex-direction: column; align-items: center; gap: 1.4cqh;
+.cs-winner-card { display: flex; flex-direction: column; align-items: center; gap: 1cqh;
   transform-origin: center; will-change: transform, opacity; }
-.cs-winner-kicker { font-weight: 700; letter-spacing: 0.5em; font-size: 2.2cqh; color: rgba(255,255,255,0.6);
-  text-indent: 0.5em; }
-.cs-winner-name { font-family: var(--display); font-size: 16cqh; line-height: 0.85; text-transform: uppercase;
-  letter-spacing: 0.01em; text-shadow: 0 0 5cqh var(--c), 0 0.8cqh 3cqh rgba(0,0,0,0.6); }
-.cs-winner-wins { font-family: var(--display); font-size: 9cqh; line-height: 0.85; color: #fff;
-  letter-spacing: 0.14em; -webkit-text-stroke: 0.25cqh color-mix(in srgb, var(--c) 70%, transparent); }
-.cs-winner-sub { font-size: 2.4cqh; font-weight: 600; letter-spacing: 0.08em; color: rgba(232,232,236,0.75);
+.cs-winner-kicker { font-weight: 700; letter-spacing: 0.45em; font-size: 1.5cqh; color: rgba(255,255,255,0.6);
+  text-indent: 0.45em; }
+.cs-winner-name { font-family: var(--display); font-size: 11cqh; line-height: 0.85; text-transform: uppercase;
+  letter-spacing: 0.01em; text-shadow: 0 0 3.5cqh var(--c), 0 0.6cqh 2cqh rgba(0,0,0,0.6); }
+.cs-winner-wins { font-family: var(--display); font-size: 6cqh; line-height: 0.85; color: #fff;
+  letter-spacing: 0.14em; -webkit-text-stroke: 0.2cqh color-mix(in srgb, var(--c) 70%, transparent); }
+.cs-winner-sub { font-size: 1.6cqh; font-weight: 600; letter-spacing: 0.07em; color: rgba(232,232,236,0.75);
   text-transform: uppercase; }
 `;
