@@ -19,17 +19,20 @@ export function handleDeath(w: World, sink: EventSink, c: Cell, killer: Cell | n
       w.pending.push(n);
     }
   }
-  if (pC.explode) explode(w, sink, c.x, c.y, c.team);
+  if (pC.explode) explode(w, sink, c.x, c.y, c.team, pC.explodeDmg ?? 7, pC.explodeR2 ?? 800);
 }
 
-export function explode(w: World, sink: EventSink, x: number, y: number, killerTeam: number): void {
+export function explode(
+  w: World, sink: EventSink, x: number, y: number, killerTeam: number, dmg: number, r2: number,
+): void {
   sink.explosion(x, y, killerTeam);
+  const scaled = dmg * w.cfg.ai.damageScale;
   for (const o of w.cells) {
     if (!o.alive || o.team === killerTeam) continue;
     const dx = o.x - x, dy = o.y - y, d2 = dx * dx + dy * dy;
-    if (d2 < 800) {
+    if (d2 < r2) {
       const d = Math.sqrt(d2 + 0.01);
-      o.hp -= 7; o.vx += (dx / d) * 1.6; o.vy += (dy / d) * 1.6;
+      o.hp -= scaled; o.vx += (dx / d) * 1.6; o.vy += (dy / d) * 1.6;
       if (o.hp <= 0 && o.alive) handleDeath(w, sink, o, null);
     }
   }
@@ -39,15 +42,18 @@ export function applyDamage(w: World, sink: EventSink, attacker: Cell | null, ta
   if (!target.alive) return;
   const pA = attacker ? w.teamPowers[attacker.team]! : null;
   const pT = w.teamPowers[target.team]!;
-  let dmg = base * (pA?.damage ?? 1);
-  if (pA?.frenzy && attacker) dmg *= 1 + (1 - attacker.hp / attacker.maxHp) * 1.6;
+  // Global combat-pace scale applies to every damage source routed through here (melee,
+  // projectiles, charge bursts) so power balance is independent of how slow fights are tuned.
+  const ds = w.cfg.ai.damageScale;
+  let dmg = base * (pA?.damage ?? 1) * ds;
+  if (pA?.frenzy && attacker) dmg *= 1 + (1 - attacker.hp / attacker.maxHp) * 1.3; // orig 1.6
   if (pT.dmgReduce) dmg *= 1 - pT.dmgReduce;
   target.hp -= dmg;
   if (pT.reflect && attacker && attacker.alive) {
     attacker.hp -= dmg * pT.reflect;
     if (attacker.hp <= 0) handleDeath(w, sink, attacker, target);
   }
-  if (pA?.heal && attacker && attacker.alive) attacker.hp = Math.min(attacker.maxHp, attacker.hp + pA.heal);
+  if (pA?.heal && attacker && attacker.alive) attacker.hp = Math.min(attacker.maxHp, attacker.hp + pA.heal * ds);
   if (pA?.infect) target.plagueT = Math.max(target.plagueT, pA.infect);
   if (pA?.stun) target.stunT = Math.max(target.stunT, pA.stun);
   if (target.hp <= 0) handleDeath(w, sink, target, attacker);

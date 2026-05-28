@@ -3,7 +3,7 @@ export interface Power {
   hp?: number; speed?: number; damage?: number; radius?: number;
   aggro?: boolean; hold?: boolean; healer?: boolean;
   heal?: number; regen?: number; auraHeal?: number; auraR?: number;
-  multiply?: number; explode?: boolean;
+  multiply?: number; explode?: boolean; explodeDmg?: number; explodeR2?: number;
   shoot?: boolean; shootCD?: number; projDamage?: number; projSpeed?: number;
   pull?: boolean; pullR?: number;
   revive?: boolean; reviveCD?: number;

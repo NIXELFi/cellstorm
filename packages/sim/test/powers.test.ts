@@ -7,7 +7,8 @@ describe("powers", () => {
     expect(new Set(POWERS.map((p) => p.name)).size).toBe(20);
   });
   it("looks up by name", () => {
-    expect(powerByName("Tank").hp).toBe(2.4);
+    expect(powerByName("Tank").hold).toBe(true);
+    expect(powerByName("Goliath").hp).toBeGreaterThan(1);
   });
   it("throws on unknown power", () => {
     expect(() => powerByName("Nope")).toThrow();

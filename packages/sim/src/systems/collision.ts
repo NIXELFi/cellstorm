@@ -68,13 +68,11 @@ export function collisionSystem(w: World, sink: EventSink): void {
             if (c.team !== o.team) {
               const pC = w.teamPowers[c.team]!;
               const pO = w.teamPowers[o.team]!;
-              // Global melee lethality scale (ai.damageScale) stretches/compresses how long a
-              // resolved battle takes without changing matchup balance (it scales both sides).
-              const ds = w.cfg.ai.damageScale;
-              let baseC = 1.4 * ds;
-              let baseO = 1.4 * ds;
-              if (pC.charge && c.dash > 0) baseC = pC.chargeBurst! * ds;
-              if (pO.charge && o.dash > 0) baseO = pO.chargeBurst! * ds;
+              // Base melee; ai.damageScale is applied uniformly inside applyDamage.
+              let baseC = 1.4;
+              let baseO = 1.4;
+              if (pC.charge && c.dash > 0) baseC = pC.chargeBurst!;
+              if (pO.charge && o.dash > 0) baseO = pO.chargeBurst!;
               c.vx -= nx * 0.4; c.vy -= ny * 0.4;
               o.vx += nx * 0.4; o.vy += ny * 0.4;
               applyDamage(w, sink, c, o, baseC);

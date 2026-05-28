@@ -8,6 +8,7 @@ import type { EventSink } from "../events";
  * pass. Stunned cells are skipped this frame (movement handles their drift).
  */
 export function abilitiesSystem(w: World, sink: EventSink): void {
+  const ds = w.cfg.ai.damageScale; // global combat-pace scale: damage AND healing scale together
   for (let i = 0; i < w.cells.length; i++) {
     const c = w.cells[i]!;
     if (!c.alive || c.stunT > 0) continue;
@@ -15,10 +16,10 @@ export function abilitiesSystem(w: World, sink: EventSink): void {
 
     if (c.plagueT > 0) {
       c.plagueT--;
-      c.hp -= 0.07;
+      c.hp -= (p.plagueDPS ?? 0.07) * ds;
       if (c.hp <= 0) { handleDeath(w, sink, c, null); continue; }
     }
-    if (p.regen && c.hp < c.maxHp) c.hp = Math.min(c.maxHp, c.hp + p.regen);
+    if (p.regen && c.hp < c.maxHp) c.hp = Math.min(c.maxHp, c.hp + p.regen * ds);
 
     if (p.shoot) {
       if (c.cdShoot > 0) c.cdShoot--;
@@ -90,7 +91,7 @@ export function abilitiesSystem(w: World, sink: EventSink): void {
             if (!o.alive || o.team !== c.team || o === c) continue;
             const dx = o.x - c.x, dy = o.y - c.y;
             if (dx * dx + dy * dy < aR2) {
-              o.hp = Math.min(o.maxHp, o.hp + p.auraHeal!);
+              o.hp = Math.min(o.maxHp, o.hp + p.auraHeal! * ds);
             }
           }
         }
