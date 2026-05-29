@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { parseRenderArgs, resolveConfig, resolveHud, resolveWidth } from "../src/cli";
+import { parseRenderArgs, resolveConfig, resolveHud, resolveWidth, resolveMusic } from "../src/cli";
 import { DEFAULT_HUD } from "@cellstorm/render/hud-config";
+import { DEFAULT_MUSIC } from "@cellstorm/audio";
 import { MASTER_WIDTH } from "../src/renderBattle";
 
 describe("parseRenderArgs", () => {
@@ -32,6 +33,25 @@ describe("parseRenderArgs", () => {
     const a = parseRenderArgs(["--config", "{}", "--out", "o.mp4", "--ss", "1.5", "--crf", "16"]);
     expect(a.ss).toBe("1.5");
     expect(a.crf).toBe("16");
+  });
+});
+
+describe("resolveMusic", () => {
+  it("returns undefined without the flag", () => {
+    expect(resolveMusic(undefined)).toBeUndefined();
+  });
+
+  it("parses the track path and merges defaults (enabled by default)", () => {
+    const m = resolveMusic('{"path":"/a.mp3","volume":0.4,"startOffsetSec":3}');
+    expect(m?.path).toBe("/a.mp3");
+    expect(m?.settings.volume).toBe(0.4);
+    expect(m?.settings.startOffsetSec).toBe(3);
+    expect(m?.settings.enabled).toBe(true);
+    expect(m?.settings.fadeOutSec).toBe(DEFAULT_MUSIC.fadeOutSec); // unspecified -> default
+  });
+
+  it("throws when the JSON has no path", () => {
+    expect(() => resolveMusic('{"volume":0.4}')).toThrow();
   });
 });
 

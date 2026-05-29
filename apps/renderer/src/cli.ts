@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { normalizeConfig, type BattleConfig } from "@cellstorm/sim";
-import { renderBattleAudioWav } from "@cellstorm/audio";
+import { renderBattleAudioWav, DEFAULT_MUSIC, type MusicSettings } from "@cellstorm/audio";
 // Import the HUD config from the pure (no-Pixi) subpath export rather than the @cellstorm/render
 // package index, whose BattlePlayer re-export pulls in pixi.js (which touches `navigator` at load
 // and throws under Node-side CLI use).
@@ -30,6 +30,8 @@ export interface RenderCliArgs {
   ss?: string;
   /** H.264 CRF (lower = higher quality). Defaults to CRF_DEFAULT. */
   crf?: string;
+  /** Custom music track mixed under the synth: JSON `{ path, volume?, startOffsetSec?, ... }`. */
+  music?: string;
   maxframes?: string;
   fps?: string;
   keep?: boolean;
@@ -49,6 +51,7 @@ export function parseRenderArgs(argv: string[]): RenderCliArgs {
       scale: { type: "string" },
       ss: { type: "string" },
       crf: { type: "string" },
+      music: { type: "string" },
       maxframes: { type: "string" },
       fps: { type: "string" },
       keep: { type: "boolean" },
@@ -83,6 +86,18 @@ export function resolveHud(hudArg: string | undefined): HudConfig {
   return { ...DEFAULT_HUD, ...JSON.parse(hudArg) };
 }
 
+/**
+ * Resolve the --music JSON flag to a track path + merged MusicSettings (defaults filled, enabled
+ * unless explicitly false). Returns undefined when no flag is given. Throws if the JSON lacks a path.
+ */
+export function resolveMusic(musicArg: string | undefined): { path: string; settings: MusicSettings } | undefined {
+  if (!musicArg) return undefined;
+  const raw = JSON.parse(musicArg) as Partial<MusicSettings> & { path?: string };
+  if (!raw.path) throw new Error('--music JSON requires a "path"');
+  const { path, ...rest } = raw;
+  return { path, settings: { ...DEFAULT_MUSIC, enabled: true, ...rest } };
+}
+
 /** Resolve the output canvas width from --scale (a fraction of the 2160px master, default 1). */
 export function resolveWidth(scaleArg: string | undefined): number {
   const scale = scaleArg ? Number(scaleArg) : 1;
@@ -105,6 +120,7 @@ async function main(argv: string[]): Promise<void> {
   if (!Number.isFinite(crf) || crf < 0) throw new Error(`--crf must be >= 0, got "${args.crf}"`);
   const maxFrames = args.maxframes ? Number(args.maxframes) : undefined;
   const fps = args.fps ? Number(args.fps) : 60;
+  const music = resolveMusic(args.music); // validate up front (throws on bad JSON / missing path)
 
   const framesDir = mkdtempSync(join(tmpdir(), "cellstorm-frames-"));
   process.stdout.write(
@@ -143,11 +159,13 @@ async function main(argv: string[]): Promise<void> {
     // Delay the audio by the flash-forward teaser length so the soundtrack starts at the cut to t=0
     // and stays in sync with the battle. The teaser plays silent (clean visual gut-punch).
     const audioOffsetSec = result.teaserFrames / fps;
+    if (music) process.stdout.write(`  music: ${music.path} (vol ${music.settings.volume}, +${music.settings.startOffsetSec}s)\n`);
     await encode({
       framesDir, outPath: args.out, fps, audioPath, audioOffsetSec,
       video: { crf, ...(downscaling ? { scaleW: result.width, scaleH: result.height } : {}) },
+      music: music ? { ...music, videoDurationSec: result.frameCount / fps } : undefined,
     });
-    process.stdout.write(`Done: ${args.out}${audioPath ? " (with sound)" : " (muted)"}\n`);
+    process.stdout.write(`Done: ${args.out}${audioPath ? " (with sound)" : " (muted)"}${music ? " (+music)" : ""}\n`);
   } finally {
     if (!args.keep) rmSync(framesDir, { recursive: true, force: true });
     else process.stdout.write(`Kept frames in ${framesDir}\n`);

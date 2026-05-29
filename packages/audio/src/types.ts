@@ -57,6 +57,35 @@ export interface Voice {
   pan: number;
 }
 
+/**
+ * User-supplied background-music track mixed UNDER the synthesized soundtrack. Same settings drive
+ * the harness Web Audio preview and the renderer's ffmpeg mux, so preview == final. The track itself
+ * is provided out-of-band (a blob/URL in the browser, a file path in the renderer).
+ */
+export interface MusicSettings {
+  /** Music present + active. */
+  enabled: boolean;
+  /** Linear gain relative to the synth soundtrack (synth is unity); < 1 sits the music under it. */
+  volume: number;
+  /** Seconds into the VIDEO at which the music begins. */
+  startOffsetSec: number;
+  /** Seconds into the MUSIC FILE to start from (skip the track's own intro). */
+  startInTrackSec: number;
+  /** Fade-in duration (seconds) where the music begins. */
+  fadeInSec: number;
+  /** Fade-out duration (seconds) at the end of the video. */
+  fadeOutSec: number;
+}
+
+export const DEFAULT_MUSIC: MusicSettings = {
+  enabled: false,
+  volume: 0.6,
+  startOffsetSec: 0,
+  startInTrackSec: 0,
+  fadeInSec: 1,
+  fadeOutSec: 1.5,
+};
+
 export interface Key {
   /** Root frequency (Hz) of the tonic in the base octave. */
   rootFreq: number;

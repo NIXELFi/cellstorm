@@ -24,3 +24,30 @@ export function audioOffsetSec(frame: number, fps: number): number {
 export function audioShouldPlay(s: PreviewAudioState): boolean {
   return s.enabled && s.playing && s.speed === 1 && !s.ended;
 }
+
+/** When/where to start the custom music source given the current playback frame. */
+export interface MusicCue {
+  /** Seconds from "now" (AudioContext clock) to start the source — 0 if it should already be playing. */
+  delaySec: number;
+  /** Offset into the decoded track to begin from. */
+  trackOffsetSec: number;
+}
+
+/**
+ * Compute the music start cue for a playback frame. The music begins at `startOffsetSec` into the
+ * VIDEO, playing from `startInTrackSec` into the track. If playback starts before the offset, the
+ * source is scheduled to begin after the remaining delay; if after, it begins immediately from the
+ * matching point inside the track (so scrubbing/resuming stays in sync). Returns null when disabled.
+ */
+export function musicCue(
+  frame: number,
+  fps: number,
+  s: { enabled: boolean; startOffsetSec: number; startInTrackSec: number },
+): MusicCue | null {
+  if (!s.enabled) return null;
+  const videoTime = frame / fps;
+  if (videoTime < s.startOffsetSec) {
+    return { delaySec: s.startOffsetSec - videoTime, trackOffsetSec: Math.max(0, s.startInTrackSec) };
+  }
+  return { delaySec: 0, trackOffsetSec: Math.max(0, s.startInTrackSec + (videoTime - s.startOffsetSec)) };
+}

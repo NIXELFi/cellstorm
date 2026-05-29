@@ -12,7 +12,8 @@ export { renderScore } from "./synth";
 export type { StereoPcm } from "./synth";
 export { pcmToWav } from "./wav";
 export { makeKey, makeVoices, degreeToFreq, beatSeconds, audioPrng, AUDIO_SALT } from "./music";
-export type { AudioScore, Note, Voice, Key, Timbre, EnvShape } from "./types";
+export type { AudioScore, Note, Voice, Key, Timbre, EnvShape, MusicSettings } from "./types";
+export { DEFAULT_MUSIC } from "./types";
 
 /** Convenience: battle log -> a ready-to-mux 16-bit stereo WAV. */
 export function renderBattleAudioWav(log: BattleLog, fps = 60, sampleRate = 44100): Uint8Array {

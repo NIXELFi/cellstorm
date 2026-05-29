@@ -24,6 +24,10 @@ import { Store, type SweepSpec } from "@cellstorm/cli";
 import { revealCommands } from "./revealCommands";
 import { initialRenderProgress, applyRenderStdout, type RenderProgress } from "./renderProgress";
 import { runBattle, captureFrames, packFrames, POWER_NAMES, normalizeConfig, type BattleConfig } from "@cellstorm/sim";
+import type { MusicSettings } from "@cellstorm/audio";
+
+/** A music track + settings as posted from the harness (path is set by the /api/music upload). */
+type MusicReq = MusicSettings & { path: string };
 import type { ScoreProfile } from "@cellstorm/score";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -91,6 +95,16 @@ function readBody(req: IncomingMessage): Promise<string> {
     const chunks: Buffer[] = [];
     req.on("data", (c) => chunks.push(c as Buffer));
     req.on("end", () => resolveBody(Buffer.concat(chunks).toString("utf8")));
+    req.on("error", reject);
+  });
+}
+
+/** Collect a raw binary request body (for the music upload). */
+function readBodyBuffer(req: IncomingMessage): Promise<Buffer> {
+  return new Promise((resolveBody, reject) => {
+    const chunks: Buffer[] = [];
+    req.on("data", (c) => chunks.push(c as Buffer));
+    req.on("end", () => resolveBody(Buffer.concat(chunks)));
     req.on("error", reject);
   });
 }
@@ -306,11 +320,33 @@ async function handleApi(
     return true;
   }
 
-  // POST /api/render  body: { configId, hud?, scale? } — render an MP4 for a candidate, then reveal
-  // it in the OS file manager and open it for playback (per-OS; see revealCommands). Returns a
+  // POST /api/music?name=<filename> — upload a user music file (raw audio bytes), saved under
+  // out/music/ so the renderer can mux it. Returns { path } to include in a later /api/render.
+  if (method === "POST" && path === "/api/music") {
+    try {
+      const buf = await readBodyBuffer(req);
+      if (buf.length === 0) {
+        sendJson(res, 400, { error: "empty upload" });
+        return true;
+      }
+      const rawName = new URL(req.url ?? "", "http://localhost").searchParams.get("name") || "track.mp3";
+      const safe = (rawName.replace(/[^a-zA-Z0-9._-]+/g, "_") || "track.mp3").slice(0, 80);
+      const musicDir = join(resolve(__dirname, "..", "..", ".."), "out", "music");
+      mkdirSync(musicDir, { recursive: true });
+      const dest = join(musicDir, `${Date.now()}-${safe}`);
+      writeFileSync(dest, buf);
+      sendJson(res, 200, { path: dest, bytes: buf.length });
+    } catch (err) {
+      sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) });
+    }
+    return true;
+  }
+
+  // POST /api/render  body: { config, hud?, scale?, music? } — render an MP4 for a candidate, then
+  // reveal it in the OS file manager and open it for playback (per-OS; see revealCommands). Returns a
   // renderId to poll.
   if (method === "POST" && path === "/api/render") {
-    let body: { config?: BattleConfig; hud?: unknown; scale?: number };
+    let body: { config?: BattleConfig; hud?: unknown; scale?: number; music?: MusicReq };
     try {
       body = JSON.parse((await readBody(req)) || "{}");
     } catch {
@@ -322,7 +358,7 @@ async function handleApi(
       return true;
     }
     try {
-      sendJson(res, 200, startRender(body.config, body.hud, body.scale));
+      sendJson(res, 200, startRender(body.config, body.hud, body.scale, body.music));
     } catch (err) {
       sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) });
     }
@@ -401,7 +437,7 @@ const renders = new Map<string, RenderProgress>();
  * frames, frames captured, encode phase) is parsed from the CLI's stdout into a RenderProgress the
  * harness polls to drive its progress bar/ETA.
  */
-function startRender(config: BattleConfig, hud: unknown, scale?: number): { renderId: string; out: string } {
+function startRender(config: BattleConfig, hud: unknown, scale?: number, music?: MusicReq): { renderId: string; out: string } {
   const repoRoot = resolve(__dirname, "..", "..", "..");
   const outDir = join(repoRoot, "out");
   mkdirSync(outDir, { recursive: true });
@@ -415,6 +451,7 @@ function startRender(config: BattleConfig, hud: unknown, scale?: number): { rend
     "--scale", String(scale && scale > 0 ? scale : 1),
   ]);
   if (hud) args.push("--hud", JSON.stringify(hud));
+  if (music?.enabled && music.path) args.push("--music", JSON.stringify(music));
 
   const renderId = `r-${Date.now()}`;
   renders.set(renderId, initialRenderProgress(out, Date.now()));

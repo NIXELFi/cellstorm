@@ -6,7 +6,11 @@
 import { unpackFrames, type BattleConfig, type BattleLog, type DrawFrame } from "@cellstorm/sim";
 import type { ResultRow, SweepSpec } from "@cellstorm/cli";
 import type { ScoreProfile } from "@cellstorm/score";
+import type { MusicSettings } from "@cellstorm/audio";
 import type { RenderProgress } from "./renderProgress";
+
+/** Music settings plus the bridge-side file path returned by uploadMusic. */
+export type MusicRender = MusicSettings & { path: string };
 
 export interface SweepProgress {
   done: number;
@@ -95,14 +99,26 @@ export async function startRender(
   config: BattleConfig,
   hud: unknown,
   scale?: number,
+  music?: MusicRender,
 ): Promise<{ renderId: string; out: string }> {
   const res = await fetch("/api/render", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ config, hud, scale }),
+    body: JSON.stringify({ config, hud, scale, music }),
   });
   if (!res.ok) throw new Error(`POST /api/render -> ${res.status}`);
   return (await res.json()) as { renderId: string; out: string };
+}
+
+/** Upload a user music file to the bridge; returns the on-disk path the renderer will mux. */
+export async function uploadMusic(file: File): Promise<{ path: string; bytes: number }> {
+  const res = await fetch(`/api/music?name=${encodeURIComponent(file.name)}`, {
+    method: "POST",
+    headers: { "content-type": "application/octet-stream" },
+    body: file,
+  });
+  if (!res.ok) throw new Error(`POST /api/music -> ${res.status}`);
+  return (await res.json()) as { path: string; bytes: number };
 }
 export function fetchRenderProgress(renderId: string): Promise<RenderState> {
   return getJson<RenderState>(`/api/render/${encodeURIComponent(renderId)}`);

@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { ffmpegArgs } from "../src/encode";
+import { ffmpegArgs, type MusicMux } from "../src/encode";
+import { DEFAULT_MUSIC } from "@cellstorm/audio";
 
 describe("ffmpegArgs", () => {
   it("builds a 60fps libx264 yuv420p command from a PNG sequence", () => {
@@ -83,5 +84,62 @@ describe("ffmpegArgs", () => {
     expect(args).not.toContain("-vf");
     expect(args).not.toContain("-crf");
     expect(args).not.toContain("-profile:v");
+  });
+});
+
+describe("ffmpegArgs with custom music", () => {
+  const music = (over: Partial<MusicMux["settings"]> = {}, vid = 30): MusicMux => ({
+    path: "/tmp/music.mp3",
+    settings: { ...DEFAULT_MUSIC, enabled: true, volume: 0.5, startOffsetSec: 2, startInTrackSec: 10, fadeInSec: 1, fadeOutSec: 2, ...over },
+    videoDurationSec: vid,
+  });
+
+  it("seeks into the track with -ss immediately before the music input", () => {
+    const args = ffmpegArgs("/f", 60, "o.mp4", "/f/audio.wav", 0, undefined, music());
+    const ss = args.indexOf("-ss");
+    expect(ss).toBeGreaterThan(-1);
+    expect(args[ss + 1]).toBe("10");
+    expect(args[ss + 2]).toBe("-i");
+    expect(args[ss + 3]).toBe("/tmp/music.mp3");
+  });
+
+  it("mixes music UNDER the synth (normalize=0) at the chosen volume", () => {
+    const fc = ffmpegArgs("/f", 60, "o.mp4", "/f/audio.wav", 0, undefined, music()).join(" ");
+    expect(fc).toContain("volume=0.5");
+    expect(fc).toContain("amix=inputs=2:normalize=0");
+  });
+
+  it("fades the music in/out and delays it to the start offset", () => {
+    const fc = ffmpegArgs("/f", 60, "o.mp4", "/f/audio.wav", 0, undefined, music()).join(" ");
+    expect(fc).toContain("afade=t=in:st=0:d=1");
+    expect(fc).toContain("afade=t=out:st=26:d=2"); // plays 30-2=28s, fade-out at 28-2=26
+    expect(fc).toContain("adelay=2000:all=1"); // 2s offset -> 2000ms
+  });
+
+  it("maps the mixed audio and keeps aac + -shortest, output last", () => {
+    const args = ffmpegArgs("/f", 60, "o.mp4", "/f/audio.wav", 0, undefined, music());
+    expect(args).toContain("-filter_complex");
+    expect(args).toContain("-map");
+    expect(args[args.indexOf("-c:a") + 1]).toBe("aac");
+    expect(args).toContain("-shortest");
+    expect(args[args.length - 1]).toBe("o.mp4");
+  });
+
+  it("uses music as the sole audio when the synth track is muted (no audioPath)", () => {
+    const fc = ffmpegArgs("/f", 60, "o.mp4", undefined, 0, undefined, music()).join(" ");
+    expect(fc).not.toContain("amix");
+    expect(fc).toContain("volume=0.5");
+  });
+
+  it("scales video via filter_complex (not -vf) when downscaling with music", () => {
+    const args = ffmpegArgs("/f", 60, "o.mp4", "/f/audio.wav", 0, { scaleW: 1080, scaleH: 1920 }, music());
+    expect(args).not.toContain("-vf");
+    expect(args.join(" ")).toContain("scale=1080:1920:flags=lanczos");
+    expect(args.join(" ")).toContain("[vout]");
+  });
+
+  it("is a no-op when music is disabled (bare command preserved)", () => {
+    const args = ffmpegArgs("/f", 60, "o.mp4", "/f/audio.wav", 0, undefined, music({ enabled: false }));
+    expect(args).not.toContain("-filter_complex");
   });
 });

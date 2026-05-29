@@ -8,12 +8,13 @@ import { Application } from "pixi.js";
 import { BattlePlayer, type HudConfig, type Theme } from "@cellstorm/render";
 import { DEFAULT_HUD } from "@cellstorm/render";
 import type { BattleConfig, BattleLog, DrawFrame, SimEvent } from "@cellstorm/sim";
-import { fetchFrames, startRender, fetchRenderProgress } from "../api";
+import { fetchFrames, startRender, fetchRenderProgress, uploadMusic, type MusicRender } from "../api";
 import { renderView } from "../renderProgress";
 import { buildOpeningSequence, DEFAULT_OPENING } from "@cellstorm/render/opening";
 import { climaxTick } from "./logLogic";
 import { PreviewAudio } from "./previewAudio";
 import { audioShouldPlay } from "./previewAudioLogic";
+import { DEFAULT_MUSIC, type MusicSettings } from "@cellstorm/audio";
 
 const PREVIEW_SCALE = 1.5; // 280x498 logical -> 420x747 canvas (crisp but light)
 
@@ -41,6 +42,10 @@ export class PlayerPanel {
   private readonly audio = new PreviewAudio();
   private soundOn = false;
   private speed = 1;
+  // Custom background music (mixed under the synth). Settings drive both the preview and the render;
+  // musicPath is the bridge-side uploaded file the renderer muxes.
+  private music: MusicSettings = { ...DEFAULT_MUSIC };
+  private musicPath?: string;
 
   // Replay state — the authoritative Node frames + per-tick events.
   private frames: DrawFrame[] = [];
@@ -168,8 +173,9 @@ export class PlayerPanel {
         this.idxF = Math.min(this.idxF + this.speed, last);
         const pos = Math.floor(this.idxF);
         if (pos !== this.lastDrawn) this.drawAt(pos, true);
-        // The teaser is silent; start the soundtrack right as playback crosses the cut to t=0.
-        if (this.soundOn && prevPos < this.cutAt && pos >= this.cutAt) this.syncAudio();
+        // Crossing into the battle: start the synth soundtrack WITHOUT restarting any music that's
+        // been playing over the cold-open intro since frame one.
+        if (this.soundOn && this.speed === 1 && prevPos < this.cutAt && pos >= this.cutAt) this.audio.startSynthOnly(0);
         if (this.idxF >= last) {
           this.setPlaying(false);
           this.audio.stop();
@@ -231,6 +237,7 @@ export class PlayerPanel {
         this.audio.stop();
       } else {
         if (this.idxF >= this.order.length - 1) { this.idxF = 0; this.lastDrawn = -1; } // replay from start (incl. teaser)
+        this.audio.unlock(); // unlock the AudioContext within this click so audio isn't autoplay-blocked
         this.setPlaying(true);
         this.syncAudio();
       }
@@ -264,8 +271,10 @@ export class PlayerPanel {
     soundBtn.onclick = () => {
       this.soundOn = !this.soundOn;
       soundLabel();
-      if (this.soundOn) this.syncAudio();
-      else this.audio.stop();
+      if (this.soundOn) {
+        this.audio.unlock(); // resume the AudioContext within this click (autoplay policy)
+        this.syncAudio();
+      } else this.audio.stop();
     };
 
     const speedSel = document.createElement("select");
@@ -308,7 +317,95 @@ export class PlayerPanel {
     this.renderCmd.className = "render-cmd";
     this.renderCmd.hidden = true;
 
-    this.controls.append(row1, row2, this.renderCmd);
+    this.controls.append(row1, row2, this.buildMusicControls(), this.renderCmd);
+  }
+
+  /** Build the custom-music controls: file picker + enable, a relative-volume slider, and start
+   *  offset / start-in-track / fade in/out. Settings feed both the preview (Web Audio) and the
+   *  render (ffmpeg mux), so what you mix here is what the MP4 carries. */
+  private buildMusicControls(): HTMLElement {
+    const row = document.createElement("div");
+    row.className = "inline music-row";
+
+    const title = document.createElement("span");
+    title.className = "muted";
+    title.textContent = "Music:";
+
+    const file = document.createElement("input");
+    file.type = "file";
+    file.accept = "audio/*";
+    file.className = "music-file";
+
+    const enableCb = document.createElement("input");
+    enableCb.type = "checkbox";
+    enableCb.checked = this.music.enabled;
+    const enable = document.createElement("label");
+    enable.className = "music-toggle";
+    enable.append(enableCb, document.createTextNode(" on"));
+
+    const status = document.createElement("span");
+    status.className = "muted music-status";
+    status.textContent = "no track";
+
+    // A labeled range with a live value readout. `live` updates on drag (volume); else on release.
+    const slider = (label: string, value: number, min: number, max: number, step: number, onChange: (v: number) => void, live = false): HTMLElement => {
+      const wrap = document.createElement("label");
+      wrap.className = "music-num";
+      const lab = document.createElement("span");
+      lab.className = "muted";
+      lab.textContent = label;
+      const inp = document.createElement("input");
+      inp.type = "range";
+      inp.min = String(min);
+      inp.max = String(max);
+      inp.step = String(step);
+      inp.value = String(value);
+      const out = document.createElement("span");
+      out.className = "muted music-val";
+      const show = (v: number) => (out.textContent = step < 1 ? v.toFixed(2) : String(v));
+      show(value);
+      const handler = () => { const v = Number(inp.value); show(v); onChange(v); };
+      if (live) inp.oninput = handler;
+      else inp.onchange = handler;
+      wrap.append(lab, inp, out);
+      return wrap;
+    };
+
+    file.onchange = async () => {
+      const f = file.files?.[0];
+      if (!f) return;
+      status.textContent = `loading ${f.name}…`;
+      try {
+        const dur = await this.audio.loadMusic(await f.arrayBuffer());
+        const { path } = await uploadMusic(f);
+        this.musicPath = path;
+        this.music = { ...this.music, enabled: true };
+        enableCb.checked = true;
+        this.audio.setMusic(this.music);
+        status.textContent = `${f.name} · ${dur.toFixed(1)}s`;
+        if (this.playing && this.soundOn) this.syncAudio();
+      } catch (err) {
+        status.textContent = `load failed: ${err instanceof Error ? err.message : String(err)}`;
+      }
+    };
+    enableCb.onchange = () => { this.music = { ...this.music, enabled: enableCb.checked }; this.applyMusic(true); };
+
+    row.append(
+      title, file, enable,
+      slider("vol", this.music.volume, 0, 1.5, 0.05, (v) => { this.music = { ...this.music, volume: v }; this.audio.setMusic(this.music); }, true),
+      slider("start +s", this.music.startOffsetSec, 0, 30, 0.5, (v) => { this.music = { ...this.music, startOffsetSec: v }; this.applyMusic(true); }),
+      slider("from +s", this.music.startInTrackSec, 0, 120, 0.5, (v) => { this.music = { ...this.music, startInTrackSec: v }; this.applyMusic(true); }),
+      slider("fade in", this.music.fadeInSec, 0, 8, 0.25, (v) => { this.music = { ...this.music, fadeInSec: v }; this.applyMusic(true); }),
+      slider("fade out", this.music.fadeOutSec, 0, 8, 0.25, (v) => { this.music = { ...this.music, fadeOutSec: v }; this.applyMusic(false); }),
+      status,
+    );
+    return row;
+  }
+
+  /** Push current music settings to the preview; re-sync playback when a timing field changed. */
+  private applyMusic(timingChanged: boolean): void {
+    this.audio.setMusic(this.music);
+    if (timingChanged && this.playing && this.soundOn) this.syncAudio();
   }
 
   /** Render this candidate to an MP4 via the bridge using the EXACT current config (Node-simulated,
@@ -327,9 +424,11 @@ export class PlayerPanel {
     bar.appendChild(fill);
     this.renderCmd.append(status, bar);
 
+    const music: MusicRender | undefined =
+      this.musicPath && this.music.enabled ? { ...this.music, path: this.musicPath } : undefined;
     let renderId: string;
     try {
-      ({ renderId } = await startRender(this.config, this.hud));
+      ({ renderId } = await startRender(this.config, this.hud, undefined, music));
     } catch (err) {
       status.textContent = `Couldn't start render: ${err instanceof Error ? err.message : String(err)}`;
       bar.classList.add("error");
@@ -353,14 +452,14 @@ export class PlayerPanel {
   private syncAudio(): void {
     const last = this.order.length - 1;
     const pos = Math.floor(this.idxF);
-    // The soundtrack is the battle (real ticks 0..N); the teaser plays silent. Map the output
-    // position back to the real battle tick and only play once we're past the cut.
-    const realTick = Math.max(0, pos - this.cutAt);
-    const ok =
-      pos >= this.cutAt &&
-      audioShouldPlay({ enabled: this.soundOn, playing: this.playing, speed: this.speed, ended: this.idxF >= last });
-    if (ok) this.audio.start(realTick);
-    else this.audio.stop();
+    if (!audioShouldPlay({ enabled: this.soundOn, playing: this.playing, speed: this.speed, ended: this.idxF >= last })) {
+      this.audio.stop();
+      return;
+    }
+    // Synth is the battle soundtrack (silent during the cold-open, starts at the cut); custom music is
+    // video-relative so it can sound over the intro from frame one. synthTick < 0 → defer the synth.
+    const synthTick = pos >= this.cutAt ? pos - this.cutAt : -1;
+    this.audio.start(synthTick, pos);
   }
 
   private jumpToClimax(): void {
