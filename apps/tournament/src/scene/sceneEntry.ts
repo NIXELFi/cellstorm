@@ -42,7 +42,9 @@ let W = 0;
 let H = 0;
 let TOTAL = 1;
 let isStatic = false;
+let fitted = false;
 const updaters: Updater[] = [];
+const fitTasks: Array<() => void> = [];
 
 const FONT_LINK_ID = "cs-tourney-fonts";
 const STYLE_ID = "cs-tourney-style";
@@ -168,7 +170,7 @@ const CSS = `
 .vs { position: absolute; font-family: var(--display); color: var(--faint); text-align: center; }
 .comp-text { display: flex; flex-direction: column; gap: 0.4cqh; min-width: 0; overflow: hidden; }
 .comp-desc { font-weight: 600; letter-spacing: 0.01em; color: var(--muted); text-transform: none;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  white-space: nowrap; overflow: hidden; }
 .intro-logo { height: 15cqh; width: auto; max-width: 42cqh; object-fit: contain;
   border-radius: 1.4cqh; filter: drop-shadow(0 0.6cqh 2.6cqh rgba(0,0,0,0.55)); }
 
@@ -248,7 +250,17 @@ function atmosphere(): Updater {
   };
 }
 
-function styleCompetitor(e: HTMLElement, name: string | null, color: number, s: { isWinner: boolean; isLoser: boolean; champ?: boolean }): void {
+/** Shrink one line of text to fit maxWidth (measured after fonts load) so long names never clip. */
+function fitOneLine(elm: HTMLElement, maxWidth: number): void {
+  elm.style.transform = "none";
+  const need = elm.scrollWidth;
+  if (maxWidth > 0 && need > maxWidth) {
+    elm.style.transformOrigin = "left center";
+    elm.style.transform = `scale(${(maxWidth / need).toFixed(4)})`;
+  }
+}
+
+function styleCompetitor(e: HTMLElement, name: string | null, color: number, s: { isWinner: boolean; isLoser: boolean; champ?: boolean }): HTMLElement {
   setVar(e, "--c", cssHex(color));
   const state = s.champ ? "champ" : s.isWinner ? "win" : s.isLoser ? "lose" : name ? "" : "tbd";
   e.className = `bx ${state}`.trim();
@@ -256,6 +268,7 @@ function styleCompetitor(e: HTMLElement, name: string | null, color: number, s: 
   span.className = "nm";
   span.textContent = name ?? "—";
   e.appendChild(span);
+  return span;
 }
 
 function drawBracket(state: BracketState, region: Region, connectors: boolean): Map<string, HTMLElement> {
@@ -267,7 +280,8 @@ function drawBracket(state: BracketState, region: Region, connectors: boolean): 
     const e = el(root, "bx");
     rect(e, r);
     e.style.fontSize = px(Math.min(r.h * 0.46, region.h * 0.02));
-    styleCompetitor(e, name, slotColor(side), { isWinner: winnerTeam === side, isLoser: winnerTeam !== null && winnerTeam !== side });
+    const span = styleCompetitor(e, name, slotColor(side), { isWinner: winnerTeam === side, isLoser: winnerTeam !== null && winnerTeam !== side });
+    if (name) fitTasks.push(() => fitOneLine(span, e.clientWidth * 0.92));
     boxes.set(key(round, m, side), e);
   };
   state.ro16.forEach((mm, m) => {
@@ -288,7 +302,8 @@ function drawBracket(state: BracketState, region: Region, connectors: boolean): 
   const champ = el(root, "bx");
   rect(champ, championRect(region));
   champ.style.fontSize = px(Math.min(championRect(region).h * 0.46, region.h * 0.024));
-  styleCompetitor(champ, state.champion, PODIUM_COLORS.gold, { isWinner: false, isLoser: false, champ: state.champion !== null });
+  const champSpan = styleCompetitor(champ, state.champion, PODIUM_COLORS.gold, { isWinner: false, isLoser: false, champ: state.champion !== null });
+  if (state.champion) fitTasks.push(() => fitOneLine(champSpan, champ.clientWidth * 0.92));
   boxes.set("champion", champ);
   return boxes;
 }
@@ -505,8 +520,12 @@ function drawMatchupPanel(r: Rect, p: MatchFramePayload): void {
     dot.style.width = px(rowH * 0.22);
     dot.style.height = px(rowH * 0.22);
     const text = el(e, "comp-text");
-    el(text, "comp-name", { fontSize: px(rowH * 0.32) }).textContent = name;
-    el(text, "comp-desc", { fontSize: px(rowH * 0.24) }).textContent = desc;
+    const nameEl = el(text, "comp-name", { fontSize: px(rowH * 0.32) });
+    nameEl.textContent = name;
+    const descEl = el(text, "comp-desc", { fontSize: px(rowH * 0.24) });
+    descEl.textContent = desc;
+    fitTasks.push(() => fitOneLine(nameEl, text.clientWidth * 0.97));
+    fitTasks.push(() => fitOneLine(descEl, text.clientWidth * 0.95));
   };
   comp(p.top, p.topDesc, slotColor(0), 0);
   el(root, "vs", { left: px(r.x), top: px(startY + rowH * 1.18), width: px(r.w), fontSize: "2.8cqh" }).textContent = "VS";
@@ -565,6 +584,10 @@ window.__scene = {
   },
 
   drawFrame(tick: number): void {
+    if (!fitted) {
+      for (const f of fitTasks) f();
+      fitted = true;
+    }
     if (isStatic) {
       for (const u of updaters) u(1);
       return;
