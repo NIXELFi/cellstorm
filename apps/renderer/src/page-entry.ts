@@ -19,6 +19,8 @@ interface InitArgs {
   framesB64: string;
   /** All sim events, for cosmetic FX + impact, keyed by tick. */
   events: SimEvent[];
+  /** Optional arena background pattern (see @cellstorm/render background.ts). */
+  bg?: string;
 }
 
 function decodeB64(b64: string): Uint8Array {
@@ -55,7 +57,7 @@ window.__cellstorm = {
 
     const resolutionScale = args.width / args.config.arena.width;
     const hudRoot = document.getElementById("hud") as HTMLElement;
-    player = new BattlePlayer(app, { config: args.config, hud: args.hud, resolutionScale, hudRoot });
+    player = new BattlePlayer(app, { config: args.config, hud: args.hud, resolutionScale, hudRoot, backgroundStyle: args.bg });
 
     frames = unpackFrames(decodeB64(args.framesB64));
     // Bucket events by the tick they happen on, so each drawn frame gets exactly its new events.

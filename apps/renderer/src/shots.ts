@@ -152,7 +152,7 @@ async function main(argv: string[]): Promise<void> {
       await page.addScriptTag({ content: pageScript });
       await page.evaluate(
         async (a) => { await window.__cellstorm.init(a); },
-        { config, hud: DEFAULT_HUD, width: renderW, height: renderH, framesB64, events: log.events },
+        { config, hud: DEFAULT_HUD, width: renderW, height: renderH, framesB64, events: log.events, bg: process.env.CS_BG },
       );
 
       for (const tick of ticks) {

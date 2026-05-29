@@ -16,6 +16,7 @@ import { powerStyle, type PowerStyle } from "./glyphs";
 import { ACTION_ZOOM, actionTransform } from "./safeArea";
 import { TRAIL_TUNING, trailQuads } from "./trail";
 import { CLASH_TUNING } from "./clash";
+import { drawBackground } from "./background";
 
 const HEAL = 0x6ef0a0;
 const POISON = 0x7fe04a;
@@ -26,6 +27,8 @@ export interface SceneOptions {
   arena: ArenaParams;
   scale: number;
   theme?: Theme;
+  /** Arena background pattern (see background.ts). Defaults to the flat fill. */
+  backgroundStyle?: string;
 }
 
 export class PixiScene {
@@ -42,12 +45,14 @@ export class PixiScene {
   private readonly arena: ArenaParams;
   private readonly scale: number;
   private readonly theme: Theme;
+  private readonly bgStyle: string;
   private styles: PowerStyle[] = [];
 
   constructor(app: Application, opts: SceneOptions) {
     this.arena = opts.arena;
     this.scale = opts.scale;
     this.theme = opts.theme ?? THEME;
+    this.bgStyle = opts.backgroundStyle ?? "anim-parallax";
     // Draw order (bottom -> top): background -> motion streaks -> glow -> cells -> projectiles ->
     // state FX -> particles (white-hot bursts) -> kill-flash rings -> clash sparks. The streak layer
     // sits above the background but BELOW the cells so each cell rides the head of its own trail;
@@ -66,9 +71,7 @@ export class PixiScene {
       this.root.scale.set(t.scale);
       this.root.position.set(t.x, t.y);
     }
-    this.trail
-      .rect(0, 0, this.arena.width * this.scale, this.arena.height * this.scale)
-      .fill({ color: this.theme.background, alpha: 1 });
+    drawBackground(this.trail, this.bgStyle, this.arena.width * this.scale, this.arena.height * this.scale, this.theme, 1);
   }
 
   draw(world: World, particles?: ParticleField, flashes?: FlashField, sparks?: ParticleField): void {
@@ -80,9 +83,11 @@ export class PixiScene {
       this.styles = world.cfg.powers.map((p) => powerStyle(p));
     }
 
-    // Trail/clear pass: low-alpha background leaves fading motion trails.
+    // Trail/clear pass: low-alpha background leaves fading motion trails. Drawing the (optional)
+    // background pattern here at the same alpha keeps the trail fade intact — cells fade toward the
+    // pattern instead of flat black.
     this.trail.clear();
-    this.trail.rect(0, 0, W, H).fill({ color: this.theme.background, alpha: 0.5 });
+    drawBackground(this.trail, this.bgStyle, W, H, this.theme, 0.5, world.frame);
 
     // Motion streaks: a tapered, team-colored comet behind each MOVING cell, opposite its velocity.
     // Faster cells get a longer/brighter streak; stationary cells get none. Batched per (team, segment)

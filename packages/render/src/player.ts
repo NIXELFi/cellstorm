@@ -36,6 +36,8 @@ export interface PlayerOptions {
   theme?: Theme;
   /** DOM element overlaying the canvas; the CSS broadcast HUD renders here. */
   hudRoot?: HTMLElement;
+  /** Arena background pattern (see background.ts). Defaults to the flat fill. */
+  backgroundStyle?: string;
 }
 
 export class BattlePlayer {
@@ -77,7 +79,7 @@ export class BattlePlayer {
     // instance) — never the gameplay RNG — so scoring stays untouched.
     this.sparks = new ParticleField(this.cosmeticPrng());
     this.clashGate = this.cosmeticPrng();
-    this.scene = new PixiScene(app, { arena: this.config.arena, scale: this.scale, theme: this.theme });
+    this.scene = new PixiScene(app, { arena: this.config.arena, scale: this.scale, theme: this.theme, backgroundStyle: opts.backgroundStyle });
     // Post-FX wraps the scene (bloom/vignette/grade + impact-reactive aberration & shake). Cosmetic
     // only; reads nothing from gameplay RNG.
     this.postfx = new PostFx(app, this.scene.root, { scale: this.scale });
