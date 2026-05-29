@@ -127,6 +127,7 @@ studies (see the `apps/lab/*.mts` scripts; rebuild similar ones to re-tune).
   99.5% — its RADIUS was the dominator, not HP). Note: 1v1 win-rate is chaotic/threshold-sensitive;
   multi-team is the real shipping context. Ranged/DoT/kite powers (Sniper/Plague/Magnet) are weak
   in 1v1 because retreat is off — they'd want kiting AI (future).
+  - **KNOWN IMBALANCE:** **Splitter is WAY too powerful** and needs a nerf in the next balance pass.
 - **Scoring (`DEFAULT_PROFILE`, score/types.ts):** duration gates 15–40s (Shorts target); weighted
   components: comeback (1.5), leadVolatility, climaxTiming, closeFinish, sustainedChaos (0.5).
   Lead volatility was ~0 (steamrolls); balancing raised it ~3×.
@@ -267,6 +268,13 @@ Open follow-ups: **faster 4K capture** (the slow part now — likely GPU accel a
 contexts and/or JPEG-or-pipe-to-ffmpeg instead of PNG-per-frame; profile first to find the bottleneck),
 kiting AI for ranged powers, and an end-to-end harness→bridge→render integration test.
 Audio follow-ups: richer per-power leitmotifs, sidechain/ducking, and a stereo-width pass.
+
+**Just landed:** selectable arena **backgrounds** (`packages/render/src/background.ts` — dots/hex/combo + tick-driven animated presets; default `anim-parallax`) and **custom background music** — a user audio file mixed UNDER the synth via ffmpeg (`--music` JSON on the renderer; bridge `/api/music` upload + harness Music controls for volume / start offset / start-in-track / fade). Music is VIDEO-relative so it can play over the cold-open intro; the synth still starts at the cut.
+
+**Planned / backlog:**
+- **Overnight auto-render** of the best ~3 candidates after a sweep — batch-render the top-N from the SQLite catalog unattended (each 4K render is ~1–1.3 hr, so a few overnight is fine).
+- **Long-form tournament mode** — a separate arena+harness variant for LONG videos: show a bracket, play each match (hand-picked from a sweep for matchup + length), compile into a well-edited video. Big effort; render time measured in hours.
+- **Balance:** nerf Splitter (see Current tuning state).
 
 ## Cross-platform notes (macOS + Windows)
 Everything except the *external render tools* (ffmpeg, Playwright Chromium) runs on both OSes from the
