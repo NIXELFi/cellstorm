@@ -4,6 +4,7 @@ dist/
 .DS_Store
 out/
 data/
+assets/
 *.tsbuildinfo
 # tsc -b compiled output should never be committed from source trees
 # (emit now goes to dist/, but guard against stray standalone tsc runs)

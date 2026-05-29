@@ -8,6 +8,7 @@
     { "path": "./apps/cli" },
     { "path": "./apps/harness" },
     { "path": "./apps/renderer" },
-    { "path": "./apps/lab" }
+    { "path": "./apps/lab" },
+    { "path": "./apps/tournament" }
   ]
 }

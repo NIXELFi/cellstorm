@@ -1,0 +1,20 @@
+{
+  "name": "@cellstorm/tournament",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "scripts": { "start": "tsx src/cli.ts" },
+  "dependencies": {
+    "@cellstorm/audio": "workspace:*",
+    "@cellstorm/render": "workspace:*",
+    "@cellstorm/renderer": "workspace:*",
+    "@cellstorm/score": "workspace:*",
+    "@cellstorm/sim": "workspace:*",
+    "ffmpeg-static": "^5.2.0",
+    "playwright": "^1.48.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.0",
+    "tsx": "^4.19.0"
+  }
+}

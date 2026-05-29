@@ -298,3 +298,20 @@ same code. The platform-specific seams and how they're handled:
 ## Conventions
 - End git commit messages with: `Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>`
 - Commit/push only when asked. Keep `sim` pure. Prefer small, focused files.
+
+## Long-form tournament music + lobby tracklist (`apps/tournament`)
+The long-form tournament bakes in two music tracks, copied (gitignored) under `assets/music/`:
+- **Battle clips:** `assets/music/battle-epic-fight.mp3` (copyright-free 1-hr fight loop), mixed UNDER the synth SFX, seeked to a per-fight seed-derived random offset.
+- **Scenes (intro / bracket beats / podium):** `assets/music/lobby-mix.mp3`, a ~53-min mix of 20 tracks. Each scene plays ONE track (seeked to its start): intro = first track, podium = last track, in-between scenes = random middle tracks (never first/last, no repeats, seed-deterministic).
+
+The timestamp→title map is HARDCODED in `apps/tournament/src/tracklist.ts` (`LOBBY_TRACKLIST`) and mirrored in `docs/lobby-tracklist.md`. **DO NOT LOSE this list** (artist attribution):
+
+```
+00:00 - longing for AIR        2:29 - nostalgic breakdown     5:35 - Spring colors
+8:11 - 公衆 Pool                11:44 - Freeze Continent       13:52 - Mesosphere
+15:59 - Bliss Boutique         17:47 - carousel.{iii}         18:43 - op234
+23:00 - Swingin' Spathiphyllums 25:55 - Mount Amazing 2        28:03 - Re: Beautiful Morning
+31:04 - UNITY                  34:40 - Portable Picnic        36:40 - 9°
+41:31 - Distant Shore          44:20 - 10 23 23 Sterile       47:37 - Injection || Midi Zone
+49:54 - Plasma Lounge          52:50 - Love Theme
+```

@@ -7,7 +7,8 @@
     "test:watch": "vitest",
     "typecheck": "tsc -b",
     "harness": "pnpm --filter @cellstorm/harness dev",
-    "sweep": "pnpm --filter @cellstorm/cli start"
+    "sweep": "pnpm --filter @cellstorm/cli start",
+    "tournament": "pnpm --filter @cellstorm/tournament start"
   },
   "devDependencies": {
     "typescript": "^5.6.0",
