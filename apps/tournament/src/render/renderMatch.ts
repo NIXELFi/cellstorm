@@ -81,7 +81,7 @@ export async function renderMatch(
       const fadeOut = Math.max(0.1, clipDur - 0.45);
       inputs.push("-ss", offset.toFixed(2), "-i", music.path);
       filters.push(`[2:a]volume=${music.volume},afade=t=in:st=0:d=0.35,afade=t=out:st=${fadeOut.toFixed(2)}:d=0.45[mus]`);
-      filters.push(`[1:a][mus]amix=inputs=2:normalize=0:duration=first[aout]`);
+      filters.push(`[1:a][mus]amix=inputs=2:normalize=0:duration=longest[aout]`);
       audioMap = "[aout]";
     }
     await runFfmpeg(
@@ -92,7 +92,8 @@ export async function renderMatch(
         "-map", "[v]", "-map", audioMap,
         "-r", String(opts.fps),
         "-c:v", "libx264", "-crf", String(opts.crf), "-preset", "medium", "-profile:v", "high", "-pix_fmt", "yuv420p",
-        "-c:a", "aac", "-b:a", "192k",
+        // Pin output to the exact clip length so audio == video (prevents drift/desync across concat).
+        "-c:a", "aac", "-b:a", "192k", "-t", (result.frameCount / opts.fps).toFixed(3),
         outPath,
       ],
       "ffmpeg composite",

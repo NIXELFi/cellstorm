@@ -8,6 +8,7 @@ import { encode } from "@cellstorm/renderer";
 import { captureScene } from "../scene/sceneCapture";
 import { silentWavBytes } from "./silentWav";
 import { runFfmpeg } from "./ffmpeg";
+import { LOBBY_TRACKLIST } from "../tracklist";
 import type { Dims } from "../dims";
 import type { ScenePayload } from "../scene/sceneData";
 import type { TournamentOptions } from "../types";
@@ -26,6 +27,8 @@ export async function renderScene(
     await captureScene(payload, d, frames, framesDir);
     if (music) {
       // Lobby track for this scene: seek to the assigned track start, fade in/out, play under the scene.
+      const track = LOBBY_TRACKLIST.find((t) => Math.abs(t.startSec - music.offsetSec) < 1);
+      process.stdout.write(`    scene music @ ${music.offsetSec.toFixed(0)}s${track ? ` (${track.title})` : ""}\n`);
       const fadeOut = Math.max(0.1, durationSec - 0.4);
       await runFfmpeg(
         [
@@ -35,7 +38,9 @@ export async function renderScene(
           "-filter_complex", `[1:a]volume=${music.volume},afade=t=in:st=0:d=0.4,afade=t=out:st=${fadeOut.toFixed(2)}:d=0.4[a]`,
           "-map", "0:v", "-map", "[a]", "-r", String(opts.fps),
           "-c:v", "libx264", "-crf", String(opts.crf), "-preset", "medium", "-profile:v", "high", "-pix_fmt", "yuv420p",
-          "-c:a", "aac", "-b:a", "192k", "-shortest", outPath,
+          // Pin the output to the exact scene length so audio == video (NO -shortest: with a finite
+          // frame sequence + a long audio track it silently drops the audio).
+          "-c:a", "aac", "-b:a", "192k", "-t", (frames / opts.fps).toFixed(3), outPath,
         ],
         "ffmpeg scene",
       );
